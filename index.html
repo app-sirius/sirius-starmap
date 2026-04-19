@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellarium Web Engine</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #000; color: #fff; overflow: hidden; }
+        #canvas { position: relative; z-index: 1; width: 100vw; height: 100vh; display: block; touch-action: none; mix-blend-mode: lighten; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10; }
+        #loading.hidden { display: none; }
+        .spinner { border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #fff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 12px; max-width: 300px; }
+    </style>
+</head>
+<body>
+    <div id="ground"></div>
+    <div id="loading"><div class="spinner"></div><p>Chargement de Stellarium...</p></div>
+    <div id="info"><div id="status">Initialisation...</div></div>
+    <script src="stellarium-web-engine.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
