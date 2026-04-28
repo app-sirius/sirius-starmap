@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Stellarium Web Engine pour Expo",
   "scripts": {
-    "serve": "python server.py"
+    "serve": "node server.js",
+    "serve:python": "python server.py"
   }
 }

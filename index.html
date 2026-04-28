@@ -13,12 +13,27 @@
         .spinner { border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #fff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 12px; max-width: 300px; }
+        #arrow { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; pointer-events: none; z-index: 5; display: none; font-size: 36px; color: #ffeb3b; text-shadow: 0 0 8px rgba(0,0,0,0.9); text-align: center; line-height: 64px; }
+        #arrow.visible { display: block; }
+        #arrow-label { position: absolute; left: 50%; top: calc(50% + 50px); transform: translateX(-50%); pointer-events: none; z-index: 5; display: none; padding: 2px 8px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 12px; white-space: nowrap; color: #ffeb3b; }
+        #arrow-label.visible { display: block; }
+        .cardinal { position: absolute; pointer-events: none; z-index: 4; color: #FD013A; font-family: 'Satoshi', 'Satoshi-Bold', sans-serif; font-weight: 700; font-size: 28px; text-shadow: 0 0 8px rgba(0,0,0,0.9); transform: translate(-50%, -50%); display: none; }
+        .cardinal.visible { display: block; }
+        @font-face { font-family: 'Satoshi'; src: url('/fonts/Satoshi-Bold.otf') format('opentype'); font-weight: 700; }
+        @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Regular.ttf') format('truetype'); font-weight: 400; }
     </style>
 </head>
 <body>
+    <canvas id="canvas"></canvas>
     <div id="ground"></div>
     <div id="loading"><div class="spinner"></div><p>Chargement de Stellarium...</p></div>
     <div id="info"><div id="status">Initialisation...</div></div>
+    <div id="arrow">➤</div>
+    <div id="arrow-label"></div>
+    <div id="cardinal-N" class="cardinal" data-az="0">N</div>
+    <div id="cardinal-E" class="cardinal" data-az="90">E</div>
+    <div id="cardinal-S" class="cardinal" data-az="180">S</div>
+    <div id="cardinal-O" class="cardinal" data-az="270">O</div>
     <script src="stellarium-web-engine.js"></script>
     <script src="app.js"></script>
 </body>
