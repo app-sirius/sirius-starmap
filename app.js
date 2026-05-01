@@ -322,14 +322,10 @@ function handleMessage(data) {
 
             case 'gyroMode':
                 gyroMode = !!message.enabled;
-                // Toujours relâcher un éventuel lock — sinon en mode AR le lock
-                // tire la caméra vers la cible et entre en conflit avec nos
-                // observerOrientation, ce qui produit des flips visuels.
-                if (typeof stel.pointAndLock === 'function') {
-                    try { stel.pointAndLock(null); } catch (e) {}
-                }
-                if (gyroMode) {
-                    trackedTarget = null;
+                if (!gyroMode) {
+                    if (typeof stel.pointAndLock === 'function') {
+                        try { stel.pointAndLock(null); } catch (e) {}
+                    }
                 }
                 break;
         }
