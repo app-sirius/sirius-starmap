@@ -2,38 +2,237 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stellarium Web Engine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Sirius — Carte du ciel</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; background: #000; color: #fff; overflow: hidden; }
-        #canvas { position: relative; z-index: 1; width: 100vw; height: 100vh; display: block; touch-action: none; mix-blend-mode: lighten; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10; }
-        #loading.hidden { display: none; }
-        .spinner { border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #fff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 12px; max-width: 300px; }
-        #arrow { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; pointer-events: none; z-index: 5; display: none; font-size: 36px; color: #ffeb3b; text-shadow: 0 0 8px rgba(0,0,0,0.9); text-align: center; line-height: 64px; }
-        #arrow.visible { display: block; }
-        #arrow-label { position: absolute; left: 50%; top: calc(50% + 50px); transform: translateX(-50%); pointer-events: none; z-index: 5; display: none; padding: 2px 8px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 12px; white-space: nowrap; color: #ffeb3b; }
-        #arrow-label.visible { display: block; }
-        .cardinal { position: absolute; pointer-events: none; z-index: 4; color: #FD013A; font-family: 'Satoshi', 'Satoshi-Bold', sans-serif; font-weight: 700; font-size: 28px; text-shadow: 0 0 8px rgba(0,0,0,0.9); transform: translate(-50%, -50%); display: none; }
-        .cardinal.visible { display: block; }
         @font-face { font-family: 'Satoshi'; src: url('/fonts/Satoshi-Bold.otf') format('opentype'); font-weight: 700; }
         @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Regular.ttf') format('truetype'); font-weight: 400; }
+        :root {
+            --sirius-red: #FD013A;
+            --sirius-bg: #000000;
+            --sirius-text: #E8EAED;
+        }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--sirius-bg); color: var(--sirius-text); overflow: hidden; }
+        #canvas { position: relative; z-index: 1; width: 100vw; height: 100vh; display: block; touch-action: none; mix-blend-mode: lighten; }
+
+        #loading {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: radial-gradient(circle at 50% 35%, #0b0b0e 0%, #000 70%);
+            z-index: 10;
+            gap: 28px;
+        }
+        #loading.hidden { display: none; }
+
+        .brand-row {
+            display: flex; align-items: center; justify-content: center;
+            gap: 22px;
+        }
+        .brand-mark {
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+            min-width: 96px;
+        }
+        .brand-mark img,
+        .brand-mark svg {
+            width: 44px; height: 44px;
+            opacity: 0.95;
+        }
+        .brand-mark .wordmark {
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.32em;
+            text-transform: uppercase;
+            color: rgba(232, 234, 237, 0.85);
+        }
+        .brand-mark.sirius .wordmark { color: var(--sirius-red); }
+        .brand-x {
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.1em;
+            color: rgba(232, 234, 237, 0.35);
+            transform: translateY(-10px);
+        }
+
+        .loading-status {
+            display: flex; flex-direction: column; align-items: center; gap: 14px;
+            margin-top: 8px;
+        }
+        .spinner {
+            width: 22px; height: 22px;
+            border: 2px solid rgba(253, 1, 58, 0.18);
+            border-top-color: var(--sirius-red);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        .loading-status p {
+            font-family: 'Satoshi', 'Inter', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+            color: rgba(232, 234, 237, 0.5);
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #arrow {
+            position: absolute; left: 50%; top: 50%;
+            width: 56px; height: 56px;
+            pointer-events: none; z-index: 5;
+            display: none;
+            font-size: 32px;
+            color: var(--sirius-red);
+            text-shadow: 0 0 12px rgba(0, 0, 0, 0.9), 0 0 24px rgba(253, 1, 58, 0.5);
+            text-align: center; line-height: 56px;
+        }
+        #arrow.visible { display: block; }
+        #arrow-label {
+            position: absolute; left: 50%; top: calc(50% + 44px);
+            transform: translateX(-50%);
+            pointer-events: none; z-index: 5;
+            display: none;
+            padding: 4px 10px;
+            background: rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(253, 1, 58, 0.4);
+            border-radius: 999px;
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            color: #ffffff;
+        }
+        #arrow-label.visible { display: block; }
+
+        #compass {
+            position: absolute;
+            top: var(--safe-top, env(safe-area-inset-top, 0px));
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(80vw, 520px);
+            height: 56px;
+            pointer-events: none; z-index: 4;
+        }
+        #compass::before {
+            content: '';
+            position: absolute;
+            top: calc(-1 * var(--safe-top, env(safe-area-inset-top, 0px)) - 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100vw;
+            height: calc(100% + var(--safe-top, env(safe-area-inset-top, 0px)) + 24px);
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.25) 50%, rgba(0, 0, 0, 0) 100%);
+            pointer-events: none;
+            z-index: -1;
+        }
+        #compass-track {
+            position: absolute;
+            top: 12px; left: 0; right: 0;
+            height: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 1);
+            overflow: hidden;
+            mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+            -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+        }
+        .compass-tick {
+            position: absolute;
+            top: 0;
+            transform: translateX(-50%);
+            font-family: 'Satoshi', sans-serif;
+            white-space: nowrap;
+            text-shadow: 0 0 8px rgba(0, 0, 0, 0.95);
+        }
+        .compass-tick.major {
+            top: 6px;
+            font-weight: 700;
+            font-size: 17px;
+            letter-spacing: 0.08em;
+            color: #ffffff;
+        }
+        .compass-tick.medium {
+            top: 9px;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            color: #ffffff;
+        }
+        .compass-tick.major::before,
+        .compass-tick.medium::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.45);
+        }
+        .compass-tick.major::before { top: -6px; }
+        .compass-tick.medium::before { top: -9px; }
+        .compass-tick.minor {
+            top: 0;
+            width: 1px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.45);
+            transform: translateX(-50%);
+        }
+        #compass-marker {
+            position: absolute;
+            top: 0; left: 50%;
+            transform: translateX(-50%);
+            width: 0; height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid #ffffff;
+            filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.9));
+        }
+        #compass-readout {
+            position: absolute;
+            top: 40px; left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            color: #ffffff;
+            text-shadow: 0 0 8px rgba(0, 0, 0, 0.95);
+        }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
-    <div id="ground"></div>
-    <div id="loading"><div class="spinner"></div><p>Chargement de Stellarium...</p></div>
-    <div id="info"><div id="status">Initialisation...</div></div>
+    <div id="loading">
+        <div class="brand-row">
+            <div class="brand-mark sirius">
+                <img src="sirius-logo.png" alt="Sirius">
+                <span class="wordmark">Sirius</span>
+            </div>
+            <div class="brand-x">×</div>
+            <div class="brand-mark">
+                <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M32 4 L35 28 L60 32 L35 36 L32 60 L29 36 L4 32 L29 28 Z" fill="#E8EAED"/>
+                    <circle cx="14" cy="14" r="1.6" fill="#E8EAED"/>
+                    <circle cx="52" cy="18" r="1.2" fill="#E8EAED"/>
+                    <circle cx="50" cy="50" r="1.4" fill="#E8EAED"/>
+                    <circle cx="12" cy="48" r="1" fill="#E8EAED"/>
+                </svg>
+                <span class="wordmark">Stellarium</span>
+            </div>
+        </div>
+        <div class="loading-status">
+            <div class="spinner"></div>
+            <p>Chargement du ciel</p>
+        </div>
+    </div>
     <div id="arrow">➤</div>
     <div id="arrow-label"></div>
-    <div id="cardinal-N" class="cardinal" data-az="0">N</div>
-    <div id="cardinal-E" class="cardinal" data-az="90">E</div>
-    <div id="cardinal-S" class="cardinal" data-az="180">S</div>
-    <div id="cardinal-O" class="cardinal" data-az="270">O</div>
+    <div id="compass">
+        <div id="compass-marker"></div>
+        <div id="compass-track"></div>
+        <div id="compass-readout">000°</div>
+    </div>
     <script src="stellarium-web-engine.js"></script>
     <script src="app.js"></script>
 </body>

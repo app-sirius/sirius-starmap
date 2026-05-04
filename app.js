@@ -4,7 +4,6 @@ let isReactNative = false;
 
 if (window.ReactNativeWebView) {
     isReactNative = true;
-    console.log('Running in React Native WebView');
 }
 
 function sendToReactNative(message) {
@@ -13,25 +12,136 @@ function sendToReactNative(message) {
     }
 }
 
-function updateStatus(text) {
-    const statusEl = document.getElementById('status');
-    if (statusEl) statusEl.textContent = text;
-    console.log('Status:', text);
+// Traduction EN → FR des objets célestes les plus cliqués. Le moteur
+// Stellarium ne livre que des noms anglais ; on les francise à l'émission
+// (event 'objectClicked') et on les injecte dans translateFn (libellés
+// rendus DANS le canvas WASM).
+// REV_NAMES permet de re-router un lookAt avec un nom FR vers son ID EN.
+const FR_NAMES = {
+    'Sun': 'Soleil',
+    'Moon': 'Lune',
+    'Mercury': 'Mercure', 'Venus': 'Vénus', 'Earth': 'Terre',
+    'Mars': 'Mars', 'Jupiter': 'Jupiter', 'Saturn': 'Saturne',
+    'Uranus': 'Uranus', 'Neptune': 'Neptune', 'Pluto': 'Pluton',
+    'Io': 'Io', 'Europa': 'Europe', 'Ganymede': 'Ganymède', 'Callisto': 'Callisto',
+    'Phobos': 'Phobos', 'Deimos': 'Déimos',
+    'Titan': 'Titan', 'Enceladus': 'Encelade', 'Mimas': 'Mimas',
+    'Tethys': 'Téthys', 'Dione': 'Dioné', 'Rhea': 'Rhéa', 'Iapetus': 'Japet',
+    'Triton': 'Triton', 'Charon': 'Charon',
+    // Étoiles brillantes
+    'Sirius': 'Sirius', 'Vega': 'Véga', 'Altair': 'Altaïr',
+    'Rigel': 'Rigel', 'Betelgeuse': 'Bételgeuse',
+    'Polaris': 'Étoile polaire', 'Arcturus': 'Arcturus',
+    'Capella': 'Capella', 'Procyon': 'Procyon',
+    'Aldebaran': 'Aldébaran', 'Pollux': 'Pollux', 'Castor': 'Castor',
+    'Spica': 'Épi', 'Antares': 'Antarès', 'Fomalhaut': 'Fomalhaut',
+    'Deneb': 'Deneb', 'Regulus': 'Régulus', 'Bellatrix': 'Bellatrix',
+    'Mintaka': 'Mintaka', 'Alnilam': 'Alnilam', 'Alnitak': 'Alnitak',
+    'Saiph': 'Saïph', 'Canopus': 'Canopus', 'Achernar': 'Achernar', 'Hadar': 'Hadar',
+    // Constellations
+    'Ursa Major': 'Grande Ourse', 'Ursa Minor': 'Petite Ourse',
+    'Orion': 'Orion', 'Cassiopeia': 'Cassiopée',
+    'Leo': 'Lion', 'Virgo': 'Vierge', 'Scorpius': 'Scorpion',
+    'Taurus': 'Taureau', 'Gemini': 'Gémeaux', 'Cancer': 'Cancer',
+    'Sagittarius': 'Sagittaire', 'Capricornus': 'Capricorne',
+    'Aquarius': 'Verseau', 'Pisces': 'Poissons', 'Aries': 'Bélier',
+    'Libra': 'Balance', 'Andromeda': 'Andromède', 'Perseus': 'Persée',
+    'Auriga': 'Cocher', 'Cygnus': 'Cygne', 'Lyra': 'Lyre',
+    'Aquila': 'Aigle', 'Pegasus': 'Pégase', 'Hercules': 'Hercule',
+    'Bootes': 'Bouvier', 'Canis Major': 'Grand Chien', 'Canis Minor': 'Petit Chien',
+    'Draco': 'Dragon', 'Hydra': 'Hydre',
+    'Centaurus': 'Centaure', 'Crux': 'Croix du Sud',
+    'Carina': 'Carène', 'Vela': 'Voiles', 'Puppis': 'Poupe',
+    // Constellations restantes (88 modernes)
+    'Antlia': 'Machine pneumatique', 'Apus': 'Oiseau de paradis',
+    'Ara': 'Autel', 'Caelum': 'Burin', 'Camelopardalis': 'Girafe',
+    'Canes Venatici': 'Chiens de chasse', 'Chamaeleon': 'Caméléon',
+    'Circinus': 'Compas', 'Columba': 'Colombe', 'Coma Berenices': 'Chevelure de Bérénice',
+    'Corona Australis': 'Couronne australe', 'Corona Borealis': 'Couronne boréale',
+    'Corvus': 'Corbeau', 'Crater': 'Coupe', 'Delphinus': 'Dauphin',
+    'Dorado': 'Dorade', 'Equuleus': 'Petit Cheval', 'Eridanus': 'Éridan',
+    'Fornax': 'Fourneau', 'Grus': 'Grue', 'Horologium': 'Horloge',
+    'Indus': 'Indien', 'Lacerta': 'Lézard', 'Leo Minor': 'Petit Lion',
+    'Lepus': 'Lièvre', 'Lupus': 'Loup', 'Lynx': 'Lynx',
+    'Mensa': 'Table', 'Microscopium': 'Microscope', 'Monoceros': 'Licorne',
+    'Musca': 'Mouche', 'Norma': 'Règle', 'Octans': 'Octant',
+    'Ophiuchus': 'Serpentaire', 'Pavo': 'Paon', 'Phoenix': 'Phénix',
+    'Pictor': 'Peintre', 'Piscis Austrinus': 'Poisson austral',
+    'Pyxis': 'Boussole', 'Reticulum': 'Réticule', 'Sagitta': 'Flèche',
+    'Sculptor': 'Sculpteur', 'Scutum': 'Écu de Sobieski',
+    'Serpens': 'Serpent', 'Sextans': 'Sextant', 'Telescopium': 'Télescope',
+    'Triangulum': 'Triangle', 'Triangulum Australe': 'Triangle austral',
+    'Tucana': 'Toucan', 'Volans': 'Poisson volant', 'Vulpecula': 'Petit Renard',
+    // Objets du ciel profond les plus connus
+    'Andromeda Galaxy': "Galaxie d'Andromède",
+    'Triangulum Galaxy': 'Galaxie du Triangle',
+    'Whirlpool Galaxy': 'Galaxie du Tourbillon',
+    'Pinwheel Galaxy': 'Galaxie du Moulinet',
+    'Sombrero Galaxy': 'Galaxie du Sombrero',
+    'Orion Nebula': "Nébuleuse d'Orion",
+    'Crab Nebula': 'Nébuleuse du Crabe',
+    'Ring Nebula': 'Nébuleuse de la Lyre',
+    'Eagle Nebula': "Nébuleuse de l'Aigle",
+    'Lagoon Nebula': 'Nébuleuse de la Lagune',
+    'Pleiades': 'Pléiades', 'Hyades': 'Hyades',
+    // Satellites
+    'ISS': 'Station spatiale internationale',
+    'International Space Station': 'Station spatiale internationale',
+    'HST': 'Hubble',
+    'Hubble Space Telescope': 'Hubble',
+};
+
+// Libellés UI rendus dans le canvas (types, points cardinaux, etc.).
+// Sont fusionnés avec FR_NAMES dans translateFn ; on les sépare ici car
+// ils n'entrent pas dans REV_NAMES (pas d'équivalent "lookAt par nom").
+const FR_UI = {
+    // Points cardinaux (textes courts dessinés sur l'horizon)
+    'N': 'N', 'S': 'S', 'E': 'E', 'W': 'O',
+    'NE': 'NE', 'NW': 'NO', 'SE': 'SE', 'SW': 'SO',
+    'North': 'Nord', 'South': 'Sud', 'East': 'Est', 'West': 'Ouest',
+    'Zenith': 'Zénith', 'Nadir': 'Nadir',
+    // Types d'objets
+    'Star': 'Étoile', 'Double Star': 'Étoile double',
+    'Variable Star': 'Étoile variable',
+    'Planet': 'Planète', 'Dwarf Planet': 'Planète naine',
+    'Moon': 'Lune', 'Asteroid': 'Astéroïde', 'Comet': 'Comète',
+    'Satellite': 'Satellite', 'Artificial Satellite': 'Satellite artificiel',
+    'Galaxy': 'Galaxie', 'Spiral Galaxy': 'Galaxie spirale',
+    'Elliptical Galaxy': 'Galaxie elliptique',
+    'Nebula': 'Nébuleuse', 'Planetary Nebula': 'Nébuleuse planétaire',
+    'Emission Nebula': 'Nébuleuse en émission',
+    'Reflection Nebula': 'Nébuleuse par réflexion',
+    'Dark Nebula': 'Nébuleuse obscure',
+    'Cluster': 'Amas', 'Open Cluster': 'Amas ouvert',
+    'Globular Cluster': 'Amas globulaire',
+    'Star Cluster': 'Amas stellaire',
+    'Constellation': 'Constellation',
+    'Region': 'Région', 'Quasar': 'Quasar',
+};
+
+const TRANSLATIONS = { ...FR_NAMES, ...FR_UI };
+
+const REV_NAMES = Object.fromEntries(
+    Object.entries(FR_NAMES).map(([en, fr]) => [fr, en])
+);
+
+function toFrench(name) {
+    return FR_NAMES[name] || name;
 }
 
 async function initStellarium() {
     try {
-        updateStatus('Initialisation du canvas...');
         canvas = document.getElementById('canvas');
-        
-        updateStatus('Chargement de Stellarium Web Engine...');
-        
+
         stel = await StelWebEngine({
             canvas: canvas,
-            wasmFile: 'stellarium-web-engine.wasm'
+            wasmFile: 'stellarium-web-engine.wasm',
+            // Branché sur _sys_set_translate_function par le runtime Emscripten
+            // (cf. stellarium-web-engine.js, onRuntimeInitialized) : tous les
+            // strings passés à _() côté C transitent par ici avant d'être
+            // dessinés sur le canvas.
+            translateFn: (domain, str) => TRANSLATIONS[str] || str,
         });
-        
-        updateStatus('Configuration de Stellarium...');
 
         await Promise.all([
             stel.setFont('regular', '/fonts/Inter-Regular.ttf'),
@@ -69,25 +179,87 @@ async function initStellarium() {
         stel.core.observer.latitude = 48.8566 * Math.PI / 180;
         stel.core.observer.longitude = 2.3522 * Math.PI / 180;
         stel.core.observer.elevation = 0;
-        const night = new Date('2025-12-12');
-        night.setUTCHours(1, 0, 0, 0);
+        const night = new Date();
         stel.core.observer.utc = night.getTime() / 86400000 + 40587;
 
+        // Conf alignée sur les défauts Stellarium desktop, ajustée pour notre
+        // UX : pas de labels par défaut (le nom apparaît au tap, géré côté RN
+        // via objectClicked), constellations en lignes seules, cardinaux
+        // moteur off (on a notre boussole HTML).
+
+        // Background / horizon
         stel.core.atmosphere.visible = true;
         stel.core.landscapes.visible = true;
-        stel.core.constellations.visible = true;
-        stel.core.stars.visible = true;
+        stel.core.cardinals.visible  = false;
+
+        // Étoiles : taille et magnitude au défaut Stellarium (linear=1.0,
+        // relative=1.0, display_limit_mag=14). hints_visible=false → pas
+        // de noms affichés ; on les voit au tap.
+        stel.core.stars.visible       = true;
+        stel.core.stars.hints_visible = false;
+        stel.core.star_linear_scale   = 1.0;
+        stel.core.star_relative_scale = 1.0;
+        stel.core.display_limit_mag   = 14;
+
+        // DSO (Messier, NGC, nébuleuses, galaxies) : rendus ET hints au
+        // défaut moteur. Les plus brillants (M31, M42, M45) apparaissent
+        // dès qu'on a un FOV suffisant ; en zoomant on découvre les autres.
+        stel.core.dsos.visible          = true;
+        stel.core.dsos.hints_visible    = true;
+        stel.core.dsos.hints_mag_offset = 0;
+        stel.core.center_hints_mag_offset = 0;
+
+        // DSS : couche de tuiles photo du ciel (Digital Sky Survey), donne
+        // les vraies textures des nébuleuses/galaxies au zoom poussé.
         stel.core.dss.visible = true;
-        stel.core.cardinals.visible = false;
 
-        stel.core.stars.hints_visible = true;
-        stel.core.stars.display_limit_mag = 14;
-        stel.core.stars.star_linear_scale = 0.4;
-        stel.core.stars.star_relative_scale = 1.2;
+        // Constellations : lignes uniquement (pas de labels, pas d'images
+        // mythologiques, pas de frontières) — comme la conf Stellarium
+        // "minimaliste" qu'on a typiquement.
+        stel.core.constellations.visible        = true;
+        stel.core.constellations.lines_visible  = true;
+        stel.core.constellations.labels_visible = false;
+        stel.core.constellations.images_visible = false;
+        stel.core.constellations.bounds_visible = false;
 
-     
+        // Tap sur un astre dans le canvas → le moteur met à jour
+        // stel.core.selection. On l'écoute pour remonter l'évènement au
+        // natif (qui ouvre la fiche de l'objet).
+        stel.core.change('selection', () => {
+            const sel = stel.core.selection;
+            if (!sel) {
+                // Désélection (tap dans le vide / sélection externe coupée) :
+                // on arrête de guider/suivre la cible précédente.
+                trackedTarget = null;
+                return;
+            }
+            try {
+                const obs = stel.core.observer;
+                const designations = sel.designations() || [];
+                const named = designations.find(d => d.startsWith('NAME '));
+                const rawName = named ? named.substring(5) : (designations[0] || 'Objet');
+                const displayName = toFrench(rawName);
+                const info = {
+                    vmag: sel.getInfo('vmag', obs),
+                    distance: sel.getInfo('distance', obs),
+                    phase: sel.getInfo('phase', obs),
+                    radius: sel.getInfo('radius', obs),
+                    radec: sel.getInfo('radec', obs),
+                    altaz: sel.getInfo('altaz', obs),
+                    type: sel.getInfo('type', obs),
+                };
+                sendToReactNative({
+                    type: 'objectClicked',
+                    name: displayName,
+                    designations,
+                    info,
+                });
+            } catch (e) {
+                console.error('selection listener error', e);
+            }
+        });
+
         document.getElementById('loading').classList.add('hidden');
-        updateStatus('Stellarium prêt !');
         sendToReactNative({ type: 'ready' });
 
         const params = new URLSearchParams(window.location.search);
@@ -97,8 +269,7 @@ async function initStellarium() {
         requestAnimationFrame(updateOverlay);
 
     } catch (error) {
-        console.error('Erreur:', error);
-        updateStatus('Erreur: ' + error.message);
+        console.error('Stellarium init failed', error);
         sendToReactNative({ type: 'error', error: error.message });
     }
 }
@@ -112,14 +283,18 @@ document.addEventListener('message', function(event) {
 });
 
 function resolveObject(name) {
-    const cap = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-    const messier = name.match(/^m\s*(\d+)$/i);
-    const ngc = name.match(/^ngc\s*(\d+)$/i);
-    const hip = name.match(/^hip\s*(\d+)$/i);
+    // Si on reçoit un nom FR (issu du tap → bottom sheet → onPoint),
+    // on revient à l'identifiant EN connu du moteur.
+    const en = REV_NAMES[name] || name;
+    const cap = en.charAt(0).toUpperCase() + en.slice(1).toLowerCase();
+    const messier = en.match(/^m\s*(\d+)$/i);
+    const ngc = en.match(/^ngc\s*(\d+)$/i);
+    const hip = en.match(/^hip\s*(\d+)$/i);
     const candidates = [
-        name,
+        en,
+        'NAME ' + en,
         'NAME ' + cap,
-        'NAME ' + name.toUpperCase(),
+        'NAME ' + en.toUpperCase(),
         cap,
         messier && `M ${messier[1]}`,
         ngc && `NGC ${ngc[1]}`,
@@ -139,7 +314,6 @@ function pointAt(name, fovDeg = 30) {
     if (!stel) return;
     const obj = resolveObject(name);
     if (!obj) {
-        updateStatus(`Objet introuvable : ${name}`);
         sendToReactNative({ type: 'lookAtError', target: name });
         return;
     }
@@ -147,7 +321,6 @@ function pointAt(name, fovDeg = 30) {
     stel.pointAndLock(obj, 1.0);
     stel.zoomTo(fovDeg * Math.PI / 180, 1.0);
     trackedTarget = { name, obj };
-    updateStatus(`${name} centré`);
     sendToReactNative({ type: 'lookAtSuccess', target: name });
 }
 
@@ -155,58 +328,78 @@ function guideTo(name) {
     if (!stel) return;
     const obj = resolveObject(name);
     if (!obj) {
-        updateStatus(`Objet introuvable : ${name}`);
         sendToReactNative({ type: 'lookAtError', target: name });
         return;
     }
-    // pas de pointAndLock ni zoomTo : on garde le contrôle gyro
+    // Sélectionne l'astre (marqueur + info engine) sans bloquer la caméra :
+    // pas de pointAndLock ni zoomTo, on garde le contrôle gyro.
+    stel.core.selection = obj;
     trackedTarget = { name, obj };
-    updateStatus(`Guidage vers ${name}`);
     sendToReactNative({ type: 'lookAtSuccess', target: name });
 }
 
 function updateOverlay() {
     if (stel) {
         updateArrow();
-        updateCardinals();
+        updateCompass();
     }
     requestAnimationFrame(updateOverlay);
 }
 
-function updateCardinals() {
-    const obs = stel.core.observer;
-    const camAz = obs.yaw;
-    const camAlt = obs.pitch;
-    const halfFov = stel.core.fov / 2;
-    const w = window.innerWidth, h = window.innerHeight;
-    const scale = (Math.min(w, h) / 2) / Math.tan(halfFov / 2);
+const COMPASS_SPAN_DEG = 120;
+const COMPASS_SPAN_RAD = COMPASS_SPAN_DEG * Math.PI / 180;
+let compassTicks = null;
 
-    document.querySelectorAll('.cardinal').forEach(el => {
-        const objAz = parseFloat(el.dataset.az) * Math.PI / 180;
-        const objAlt = 0;
-        const dAz = stel.anpm(objAz - camAz);
-        const cosA = Math.sin(camAlt) * Math.sin(objAlt)
-                   + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
-
-        if (cosA < -0.95) {
-            el.classList.remove('visible');
-            return;
+function buildCompass() {
+    const track = document.getElementById('compass-track');
+    if (!track) return [];
+    const majors = ['N', 'E', 'S', 'O'];
+    const mediums = ['NE', 'SE', 'SO', 'NO'];
+    const ticks = [];
+    for (let deg = 0; deg < 360; deg += 15) {
+        const el = document.createElement('div');
+        el.className = 'compass-tick';
+        if (deg % 90 === 0) {
+            el.classList.add('major');
+            el.textContent = majors[deg / 90];
+        } else if (deg % 45 === 0) {
+            el.classList.add('medium');
+            el.textContent = mediums[(deg - 45) / 90];
+        } else {
+            el.classList.add('minor');
         }
-        const sx = Math.sin(dAz) * Math.cos(objAlt);
-        const sy = Math.sin(objAlt) * Math.cos(camAlt)
-                 - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
-        const denom = 1 + cosA;
-        const px = w / 2 + (sx / denom) * scale;
-        const py = h / 2 - (sy / denom) * scale;
+        el.dataset.az = deg;
+        track.appendChild(el);
+        ticks.push(el);
+    }
+    return ticks;
+}
 
-        if (px < -50 || px > w + 50 || py < -50 || py > h + 50) {
-            el.classList.remove('visible');
-            return;
+function updateCompass() {
+    if (!compassTicks) compassTicks = buildCompass();
+    const track = document.getElementById('compass-track');
+    if (!track) return;
+    const w = track.clientWidth;
+    if (!w) return;
+
+    const camAz = stel.core.observer.yaw;
+    const halfSpan = COMPASS_SPAN_RAD / 2;
+
+    for (const el of compassTicks) {
+        const tickAz = parseFloat(el.dataset.az) * Math.PI / 180;
+        const dAz = stel.anpm(tickAz - camAz);
+        if (Math.abs(dAz) > halfSpan) {
+            el.style.display = 'none';
+            continue;
         }
-        el.style.left = px + 'px';
-        el.style.top = py + 'px';
-        el.classList.add('visible');
-    });
+        const x = (dAz / COMPASS_SPAN_RAD + 0.5) * w;
+        el.style.display = 'block';
+        el.style.left = x + 'px';
+    }
+
+    const deg = ((camAz * 180 / Math.PI) % 360 + 360) % 360;
+    const readout = document.getElementById('compass-readout');
+    if (readout) readout.textContent = Math.round(deg).toString().padStart(3, '0') + '°';
 }
 
 function updateArrow() {
@@ -258,12 +451,17 @@ function updateArrow() {
 }
 
 function handleMessage(data) {
-    if (!stel) return;
-    
     try {
         const message = typeof data === 'string' ? JSON.parse(data) : data;
-        console.log('Message reçu:', message);
-        
+
+        if (message.type === 'insets') {
+            const top = typeof message.top === 'number' ? message.top : 0;
+            document.documentElement.style.setProperty('--safe-top', top + 'px');
+            return;
+        }
+
+        if (!stel) return;
+
         switch (message.type) {
             case 'observerOrientation':
                 if (typeof message.yaw === 'number') stel.core.observer.yaw = message.yaw;
@@ -275,10 +473,13 @@ function handleMessage(data) {
                 
             case 'location':
                 if (message.coords) {
+                    console.log('[stellarium] location message received', message.coords);
                     stel.core.observer.latitude = message.coords.latitude * Math.PI / 180;
                     stel.core.observer.longitude = message.coords.longitude * Math.PI / 180;
                     stel.core.observer.elevation = message.coords.altitude || 0;
-                    updateStatus(`Position: ${message.coords.latitude.toFixed(2)}, ${message.coords.longitude.toFixed(2)}`);
+                    if (typeof stel.core.observer.update === 'function') {
+                        stel.core.observer.update();
+                    }
                 }
                 break;
                 
@@ -330,7 +531,7 @@ function handleMessage(data) {
                 break;
         }
     } catch (error) {
-        console.error('Erreur:', error);
+        console.error('handleMessage failed', error);
     }
 }
 

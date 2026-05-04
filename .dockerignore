@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.DS_Store
+CLAUDE.md
+README.md
+pano2hips.py
+pano.jpg
+pano.png
+panorama
+server.py
+Dockerfile
+.dockerignore
+docker-compose.yml

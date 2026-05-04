@@ -1,0 +1,8 @@
+services:
+  stellarium:
+    build: .
+    image: sirius-stellarium
+    container_name: sirius-stellarium
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
