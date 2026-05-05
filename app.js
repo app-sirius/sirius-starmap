@@ -185,8 +185,11 @@ async function initStellarium() {
         stel.core.observer.latitude = 48.8566 * Math.PI / 180;
         stel.core.observer.longitude = 2.3522 * Math.PI / 180;
         stel.core.observer.elevation = 0;
-        const night = new Date();
-        stel.core.observer.utc = night.getTime() / 86400000 + 40587;
+        // Temps initialisé à l'instant réel ; updateOverlay le ré-applique
+        // à chaque frame pour que le ciel évolue en direct (comportement
+        // Stellarium Web). `setTime` modifie `timeOffsetMs` pour téléporter
+        // l'observation à un moment donné tout en gardant l'avance temps réel.
+        stel.core.observer.utc = Date.now() / 86400000 + 40587;
 
         // Conf alignée sur les défauts Stellarium desktop, ajustée pour notre
         // UX : pas de labels par défaut (le nom apparaît au tap, géré côté RN
@@ -198,22 +201,27 @@ async function initStellarium() {
         stel.core.landscapes.visible = true;
         stel.core.cardinals.visible  = false;
 
-        // Étoiles : taille et magnitude au défaut Stellarium (linear=1.0,
-        // relative=1.0, display_limit_mag=14). hints_visible=false → pas
-        // de noms affichés ; on les voit au tap.
+        // Étoiles : on pousse `linear` (boost uniforme) pour que les étoiles
+        // ressortent davantage au FOV par défaut, mais on garde `relative`
+        // au défaut — `relative > 1` étire l'écart bright↔dim et fait
+        // gonfler les objets brillants rendus en point-source (Jupiter,
+        // Vénus…) car le moteur réutilise le pipeline étoile pour les
+        // planètes sous une certaine taille angulaire.
         stel.core.stars.visible       = true;
         stel.core.stars.hints_visible = false;
-        stel.core.star_linear_scale   = 1.0;
-        stel.core.star_relative_scale = 1.0;
-        stel.core.display_limit_mag   = 14;
+        stel.core.star_linear_scale   = 1.3;
+        stel.core.star_relative_scale = 0.9;
+        stel.core.display_limit_mag   = 15.5;
 
-        // DSO (Messier, NGC, nébuleuses, galaxies) : rendus ET hints au
-        // défaut moteur. Les plus brillants (M31, M42, M45) apparaissent
-        // dès qu'on a un FOV suffisant ; en zoomant on découvre les autres.
-        stel.core.dsos.visible          = true;
-        stel.core.dsos.hints_visible    = true;
-        stel.core.dsos.hints_mag_offset = 0;
-        stel.core.center_hints_mag_offset = 0;
+        // DSO (Messier, NGC, nébuleuses, galaxies) : rendus ET hints, avec
+        // un mag_offset positif pour révéler davantage d'objets directement
+        // au FOV par défaut (sans avoir à zoomer pour découvrir les Messier
+        // moins brillants). +2.5 ramène ~tout le catalogue Messier visible
+        // d'entrée, ainsi qu'une bonne partie des NGC les plus connus.
+        stel.core.dsos.visible            = true;
+        stel.core.dsos.hints_visible      = true;
+        stel.core.dsos.hints_mag_offset   = 1.5;
+        stel.core.center_hints_mag_offset = 1.5;
 
         // DSS : couche de tuiles photo du ciel (Digital Sky Survey), donne
         // les vraies textures des nébuleuses/galaxies au zoom poussé.
@@ -265,6 +273,31 @@ async function initStellarium() {
             }
         });
 
+        // Détection d'un pan utilisateur en mode gyro : un slide à un doigt
+        // (> seuil) signale que l'utilisateur reprend la main, on demande
+        // au natif de couper le gyro. Filtré sur gyroMode pour ne pas
+        // spammer postMessage hors AR. Pinch (2 doigts) ignoré : zoom FOV
+        // est orthogonal à l'orientation et reste autorisé pendant le gyro.
+        const PAN_THRESHOLD_PX = 8;
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let panNotified = false;
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            panNotified = false;
+        }, { passive: true });
+        canvas.addEventListener('touchmove', (e) => {
+            if (!gyroMode || panNotified || e.touches.length !== 1) return;
+            const dx = e.touches[0].clientX - touchStartX;
+            const dy = e.touches[0].clientY - touchStartY;
+            if (Math.hypot(dx, dy) > PAN_THRESHOLD_PX) {
+                panNotified = true;
+                sendToReactNative({ type: 'userPan' });
+            }
+        }, { passive: true });
+
         document.getElementById('loading').classList.add('hidden');
         sendToReactNative({ type: 'ready' });
 
@@ -315,6 +348,10 @@ function resolveObject(name) {
 
 let trackedTarget = null;
 let gyroMode = false;
+// Décalage entre l'horloge réelle et le temps d'observation (ms). 0 = live.
+// `setTime` met à jour cet offset pour figer un instant tout en continuant
+// à avancer en temps réel depuis ce point.
+let timeOffsetMs = 0;
 
 function pointAt(name, fovDeg = 30) {
     if (!stel) return;
@@ -346,6 +383,7 @@ function guideTo(name) {
 
 function updateOverlay() {
     if (stel) {
+        stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
         updateArrow();
         updateCompass();
     }
@@ -501,7 +539,13 @@ function handleMessage(data) {
                 
             case 'setTime':
                 if (message.time) {
-                    stel.core.observer.utc = new Date(message.time).getTime() / 86400000 + 40587;
+                    // Téléporte l'observation au moment demandé tout en
+                    // laissant le temps avancer en réel depuis ce point.
+                    // Pour revenir au live, RN peut envoyer setTime avec
+                    // l'instant courant (ou setTime sans `time` → reset).
+                    timeOffsetMs = new Date(message.time).getTime() - Date.now();
+                } else {
+                    timeOffsetMs = 0;
                 }
                 break;
                 
