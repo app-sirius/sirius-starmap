@@ -1,7 +1,12 @@
 {
-  "name": "stellarium-web",
+  "name": "sirius-starmap",
   "version": "1.0.0",
-  "description": "Stellarium Web Engine pour Expo",
+  "description": "Sirius Starmap — Stellarium Web Engine integration for the Sirius mobile app and browsers",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/app-sirius/sirius-starmap.git"
+  },
   "scripts": {
     "serve": "node server.js",
     "serve:python": "python server.py"

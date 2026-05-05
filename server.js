@@ -1,3 +1,9 @@
+// Sirius Starmap
+// Copyright (C) 2024-2026 Sirius
+// Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+// See LICENSE and NOTICE at the root of this repository for details.
+// Source: https://github.com/app-sirius/sirius-starmap
+
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
