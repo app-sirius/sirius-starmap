@@ -507,6 +507,9 @@ function updateStarLabels() {
 
     const camAz = obs.yaw;
     const camAlt = obs.pitch;
+    const camRoll = obs.roll || 0;
+    const cosRoll = Math.cos(camRoll);
+    const sinRoll = Math.sin(camRoll);
     const halfFov = stel.core.fov / 2;
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -544,9 +547,15 @@ function updateStarLabels() {
         const sy = Math.sin(objAlt) * Math.cos(camAlt)
                  - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
 
+        // Compense le roll caméra : sans ça, les labels HTML restent
+        // alignés à l'écran tandis que le canvas WebGL tourne avec
+        // l'inclinaison du téléphone → décalage visible.
+        const sxr =  cosRoll * sx + sinRoll * sy;
+        const syr = -sinRoll * sx + cosRoll * sy;
+
         const k = 2 / (1 + cosA);
-        const px = w / 2 + sx * k * focal;
-        const py = h / 2 - sy * k * focal;
+        const px = w / 2 + sxr * k * focal;
+        const py = h / 2 - syr * k * focal;
 
         if (px < -margin || px > w + margin || py < -margin || py > h + margin) {
             sl.el.classList.remove('visible');
@@ -635,6 +644,7 @@ function updateArrow() {
     const [objAz, objAlt] = stel.c2s(pObs);
     const camAz = obs.yaw;
     const camAlt = obs.pitch;
+    const camRoll = obs.roll || 0;
     const dAz = stel.anpm(objAz - camAz);
     const dAlt = objAlt - camAlt;
 
@@ -652,7 +662,11 @@ function updateArrow() {
         const sx = Math.sin(dAz) * Math.cos(objAlt);
         const sy = Math.sin(objAlt) * Math.cos(camAlt)
                  - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
-        const screenAngle = Math.atan2(-sy, sx);
+        // Compense le roll caméra (cf. updateStarLabels).
+        const cosRoll = Math.cos(camRoll), sinRoll = Math.sin(camRoll);
+        const sxr =  cosRoll * sx + sinRoll * sy;
+        const syr = -sinRoll * sx + cosRoll * sy;
+        const screenAngle = Math.atan2(-syr, sxr);
 
         arrowEl.style.left = '50%';
         arrowEl.style.top = '50%';
