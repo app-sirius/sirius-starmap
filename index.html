@@ -207,6 +207,28 @@
             color: #ffffff;
             text-shadow: 0 0 8px rgba(0, 0, 0, 0.95);
         }
+
+        #star-labels {
+            position: absolute; inset: 0;
+            pointer-events: none; z-index: 3;
+            overflow: hidden;
+        }
+        .star-label {
+            position: absolute;
+            left: 0; top: 0;
+            transform: translate(-50%, -180%);
+            pointer-events: none;
+            display: none;
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 0 6px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.7);
+            white-space: nowrap;
+        }
+        .star-label.visible { display: block; }
     </style>
 </head>
 <body>
@@ -241,6 +263,7 @@
         <div id="compass-track"></div>
         <div id="compass-readout">000°</div>
     </div>
+    <div id="star-labels"></div>
     <script src="stellarium-web-engine.js"></script>
     <script src="app.js"></script>
 </body>

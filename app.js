@@ -8,6 +8,33 @@ let stel = null;
 let canvas = null;
 let isReactNative = false;
 
+// Étoiles brillantes (mag ≲ 2) qui doivent toujours afficher leur nom dans
+// le ciel, comme les planètes. Le moteur n'expose pas de filtre par
+// magnitude pour les hints d'étoiles (juste un toggle global), donc on
+// rend les labels en HTML par-dessus le canvas. Les noms FR sont résolus
+// via FR_NAMES (toFrench).
+const BRIGHT_STARS = [
+    'Sirius', 'Vega', 'Altair', 'Rigel', 'Betelgeuse',
+    'Polaris', 'Arcturus', 'Capella', 'Procyon',
+    'Aldebaran', 'Pollux', 'Castor', 'Spica', 'Antares',
+    'Fomalhaut', 'Deneb', 'Regulus', 'Bellatrix',
+    'Mintaka', 'Alnilam', 'Alnitak', 'Saiph',
+    'Canopus', 'Achernar', 'Hadar',
+];
+let starLabels = [];
+// Référence du Soleil pour cacher les labels en journée (ciel trop
+// lumineux pour que les étoiles soient visibles à l'œil). Sa position
+// dépend uniquement du temps + observer, pas de la caméra → on cache
+// le résultat et on rafraîchit toutes les SUN_CHECK_INTERVAL_MS.
+let sunObj = null;
+let isDaytime = false;
+let lastSunCheckMs = 0;
+const SUN_CHECK_INTERVAL_MS = 2000;
+// Désignations de l'objet actuellement sélectionné par le moteur (tap).
+// On l'utilise pour masquer NOTRE label HTML quand le moteur dessine déjà
+// son propre label de sélection (sinon superposition visuelle).
+let selectedDesignations = null;
+
 if (window.ReactNativeWebView) {
     isReactNative = true;
 }
@@ -156,7 +183,11 @@ async function initStellarium() {
 
         const baseUrl = '/data/';
         const starsPack = 'swe-data-packs/base/2020-09-01/base_2020-09-01_1aa210df';
-        stel.core.stars.addDataSource({ url: baseUrl + starsPack + '/stars', key: 'base' });
+        // On ne charge QUE le pack `minimal` (mag −1 → 7) : ce sont les
+        // étoiles brillantes utilisées dans les constellations (HIP).
+        // Les packs `base` (7 → 8) et `extended` (8 → 11.5) noyaient le
+        // ciel d'étoiles faibles. À rajouter si on veut un ciel dense.
+        stel.core.stars.addDataSource({ url: baseUrl + 'swe-data-packs/minimal/2020-09-01/minimal_2020-09-01_186e7ee2/stars', key: 'minimal' });
         stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/western', key: 'western' });
         stel.core.dsos.addDataSource({ url: baseUrl + starsPack + '/dso' });
         // stel.core.landscapes.addDataSource({ url: baseUrl + 'landscapes/v1/guereins', key: 'guereins' });
@@ -185,16 +216,31 @@ async function initStellarium() {
         stel.core.observer.latitude = 48.8566 * Math.PI / 180;
         stel.core.observer.longitude = 2.3522 * Math.PI / 180;
         stel.core.observer.elevation = 0;
-        // Temps initialisé à l'instant réel ; updateOverlay le ré-applique
-        // à chaque frame pour que le ciel évolue en direct (comportement
-        // Stellarium Web). `setTime` modifie `timeOffsetMs` pour téléporter
-        // l'observation à un moment donné tout en gardant l'avance temps réel.
-        stel.core.observer.utc = Date.now() / 86400000 + 40587;
+        // Sky map = expérience nocturne. Si on est en plein jour, le moteur
+        // rend un ciel bleu et masque toutes les étoiles → inutilisable.
+        // On décale donc l'observation vers la nuit la plus proche (22:00
+        // UTC, ~minuit Europe / soirée Amériques). On passe par `timeOffsetMs`
+        // pour rester compatible avec `setTime` (qui réécrit cet offset
+        // pour téléporter à un instant donné) et `updateOverlay` qui ré-
+        // applique `Date.now() + timeOffsetMs` à chaque frame, gardant
+        // ainsi l'avance temps réel à partir du point décalé.
+        const nowMs = Date.now();
+        const tonight = new Date(nowMs);
+        tonight.setUTCHours(22, 0, 0, 0);
+        if (tonight.getTime() < nowMs) tonight.setUTCDate(tonight.getUTCDate() + 1);
+        timeOffsetMs = tonight.getTime() - nowMs;
+        stel.core.observer.utc = (nowMs + timeOffsetMs) / 86400000 + 40587;
 
         // Conf alignée sur les défauts Stellarium desktop, ajustée pour notre
         // UX : pas de labels par défaut (le nom apparaît au tap, géré côté RN
         // via objectClicked), constellations en lignes seules, cardinaux
         // moteur off (on a notre boussole HTML).
+
+        // FOV initial calé sur la vision humaine confortable (~60°) — c'est
+        // l'angle où la perception des distances entre étoiles correspond
+        // à ce qu'on voit à l'œil nu en regardant le ciel. Stellarium
+        // desktop utilise la même valeur par défaut.
+        stel.core.fov = 60 * Math.PI / 180;
 
         // Background / horizon
         stel.core.atmosphere.visible = true;
@@ -209,19 +255,20 @@ async function initStellarium() {
         // planètes sous une certaine taille angulaire.
         stel.core.stars.visible       = true;
         stel.core.stars.hints_visible = false;
-        stel.core.star_linear_scale   = 1.3;
-        stel.core.star_relative_scale = 0.9;
-        stel.core.display_limit_mag   = 15.5;
+        stel.core.star_linear_scale   = 1.0;
+        stel.core.star_relative_scale = 1.0;
 
-        // DSO (Messier, NGC, nébuleuses, galaxies) : rendus ET hints, avec
-        // un mag_offset positif pour révéler davantage d'objets directement
-        // au FOV par défaut (sans avoir à zoomer pour découvrir les Messier
-        // moins brillants). +2.5 ramène ~tout le catalogue Messier visible
-        // d'entrée, ainsi qu'une bonne partie des NGC les plus connus.
-        stel.core.dsos.visible            = true;
-        stel.core.dsos.hints_visible      = true;
-        stel.core.dsos.hints_mag_offset   = 1.5;
-        stel.core.center_hints_mag_offset = 1.5;
+        // DSO (Messier, NGC, nébuleuses, galaxies) : rendus ET hints, le
+        // mag_offset est piloté par applyBortle() en fonction de la
+        // pollution lumineuse (sinon les Messier perdus dans la brume
+        // restent affichés malgré un bortle élevé).
+        stel.core.dsos.visible       = true;
+        stel.core.dsos.hints_visible = true;
+
+        // Pollution lumineuse : pilote bortle_index + display_limit_mag
+        // + DSO mag_offset depuis une seule échelle. Init à 9 pour rendre
+        // l'effet flagrant ; le natif réajuste via `setBortle`.
+        applyBortle(1);
 
         // DSS : couche de tuiles photo du ciel (Digital Sky Survey), donne
         // les vraies textures des nébuleuses/galaxies au zoom poussé.
@@ -232,7 +279,7 @@ async function initStellarium() {
         // "minimaliste" qu'on a typiquement.
         stel.core.constellations.visible        = true;
         stel.core.constellations.lines_visible  = true;
-        stel.core.constellations.labels_visible = false;
+        stel.core.constellations.labels_visible = true;
         stel.core.constellations.images_visible = false;
         stel.core.constellations.bounds_visible = false;
 
@@ -245,11 +292,13 @@ async function initStellarium() {
                 // Désélection (tap dans le vide / sélection externe coupée) :
                 // on arrête de guider/suivre la cible précédente.
                 trackedTarget = null;
+                selectedDesignations = null;
                 return;
             }
             try {
                 const obs = stel.core.observer;
                 const designations = sel.designations() || [];
+                selectedDesignations = designations;
                 const named = designations.find(d => d.startsWith('NAME '));
                 const rawName = named ? named.substring(5) : (designations[0] || 'Objet');
                 const displayName = toFrench(rawName);
@@ -298,6 +347,8 @@ async function initStellarium() {
             }
         }, { passive: true });
 
+        buildStarLabels();
+
         document.getElementById('loading').classList.add('hidden');
         sendToReactNative({ type: 'ready' });
 
@@ -320,6 +371,20 @@ window.addEventListener('message', function(event) {
 document.addEventListener('message', function(event) {
     handleMessage(event.data);
 });
+
+// Pilote la pollution lumineuse côté moteur. `bortle_index` seul ne
+// change quasi rien à l'écran : il faut aussi resserrer la magnitude
+// limite (NELM typique) et le mag_offset des DSO, sinon les étoiles
+// faibles + tous les Messier restent affichés malgré la pollution.
+//   Bortle 1 ≈ NELM 7.6 • 5 ≈ 6.0 • 9 ≈ 4.0  (formule linéaire 8 − 0.5·b)
+function applyBortle(bortle) {
+    const b = Math.max(1, Math.min(9, bortle));
+    stel.core.atmosphere.bortle_index = b;
+    stel.core.display_limit_mag = 8 - 0.5 * b;
+    const dsoOffset = Math.max(-1, 1.5 - 0.3 * b);
+    stel.core.dsos.hints_mag_offset = dsoOffset;
+    stel.core.center_hints_mag_offset = dsoOffset;
+}
 
 function resolveObject(name) {
     // Si on reçoit un nom FR (issu du tap → bottom sheet → onPoint),
@@ -386,8 +451,112 @@ function updateOverlay() {
         stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
         updateArrow();
         updateCompass();
+        updateStarLabels();
     }
     requestAnimationFrame(updateOverlay);
+}
+
+function buildStarLabels() {
+    const container = document.getElementById('star-labels');
+    if (!container) return;
+    starLabels = [];
+    // Le catalogue d'étoiles est encore en cours de chargement à ce stade :
+    // on crée les DOM tout de suite, et `updateStarLabels` tente de
+    // résoudre l'objet engine à chaque frame tant qu'il est null.
+    for (const name of BRIGHT_STARS) {
+        const el = document.createElement('div');
+        el.className = 'star-label';
+        el.textContent = toFrench(name);
+        container.appendChild(el);
+        starLabels.push({ name, obj: null, el });
+    }
+}
+
+// Projection stéréographique caméra→écran (celle qu'utilise Stellarium
+// Web par défaut). On calcule (sx, sy, cosA) = vecteur unitaire vers
+// l'astre exprimé dans la base caméra (right, up, forward), puis on
+// applique la projection stéréographique depuis l'antipode du forward.
+// Le focal est calé sur le plus petit côté de l'écran (convention engine
+// pour `core.fov`). Label masqué si sous l'horizon, derrière la caméra,
+// ou hors écran.
+function updateStarLabels() {
+    if (!stel || !starLabels.length) return;
+    const obs = stel.core.observer;
+
+    // Jour ? Si le Soleil est plus haut que le crépuscule civil (-6°),
+    // le ciel est trop clair pour distinguer les étoiles à l'œil → on
+    // masque tous nos labels. Throttlé : le Soleil bouge ~0.25°/min,
+    // recalculer à chaque frame est inutile.
+    const now = Date.now();
+    if (now - lastSunCheckMs > SUN_CHECK_INTERVAL_MS) {
+        lastSunCheckMs = now;
+        if (!sunObj) sunObj = stel.getObj('Sun') || stel.getObj('NAME Sun');
+        if (sunObj) {
+            const pSun = sunObj.getInfo('radec', obs);
+            if (pSun) {
+                const pSunObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', pSun);
+                const [, sunAlt] = stel.c2s(pSunObs);
+                isDaytime = sunAlt > -6 * Math.PI / 180;
+            }
+        }
+    }
+    if (isDaytime) {
+        for (const sl of starLabels) sl.el.classList.remove('visible');
+        return;
+    }
+
+    const camAz = obs.yaw;
+    const camAlt = obs.pitch;
+    const halfFov = stel.core.fov / 2;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const focal = (Math.min(w, h) / 2) / (2 * Math.tan(halfFov / 2));
+    const margin = 40;
+
+    for (const sl of starLabels) {
+        if (!sl.obj) {
+            sl.obj = resolveObject(sl.name);
+            if (sl.obj) sl.designations = sl.obj.designations() || [];
+        }
+        if (!sl.obj) { sl.el.classList.remove('visible'); continue; }
+        // Si le moteur a déjà sélectionné cette étoile (tap utilisateur),
+        // il dessine son propre label : on masque le nôtre pour éviter la
+        // superposition.
+        if (selectedDesignations && sl.designations &&
+            sl.designations.some(d => selectedDesignations.includes(d))) {
+            sl.el.classList.remove('visible');
+            continue;
+        }
+        const pIcrf = sl.obj.getInfo('radec', obs);
+        if (!pIcrf) { sl.el.classList.remove('visible'); continue; }
+        const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', pIcrf);
+        const [objAz, objAlt] = stel.c2s(pObs);
+
+        if (objAlt <= 0) { sl.el.classList.remove('visible'); continue; }
+
+        const dAz = stel.anpm(objAz - camAz);
+        const cosA = Math.sin(camAlt) * Math.sin(objAlt)
+                   + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
+        // cosA = -1 (astre derrière, antipode) → singularité de la projection
+        if (cosA <= -0.999) { sl.el.classList.remove('visible'); continue; }
+
+        const sx = Math.sin(dAz) * Math.cos(objAlt);
+        const sy = Math.sin(objAlt) * Math.cos(camAlt)
+                 - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
+
+        const k = 2 / (1 + cosA);
+        const px = w / 2 + sx * k * focal;
+        const py = h / 2 - sy * k * focal;
+
+        if (px < -margin || px > w + margin || py < -margin || py > h + margin) {
+            sl.el.classList.remove('visible');
+            continue;
+        }
+
+        sl.el.style.left = px + 'px';
+        sl.el.style.top = py + 'px';
+        sl.el.classList.add('visible');
+    }
 }
 
 const COMPASS_SPAN_DEG = 120;
@@ -553,7 +722,18 @@ function handleMessage(data) {
                 if (message.layer) {
                     const layer = stel.core[message.layer];
                     if (layer) {
-                        layer.visible = message.visible !== undefined ? message.visible : !layer.visible;
+                        const next = message.visible !== undefined ? message.visible : !layer.visible;
+                        layer.visible = next;
+                        // `constellations.visible` est un master toggle qui
+                        // ne propage pas aux sous-flags `lines_visible` /
+                        // `labels_visible` (allumés explicitement à l'init,
+                        // ils restent dessinés même quand `visible=false`).
+                        // On les pilote en miroir pour que l'utilisateur
+                        // voie réellement les lignes disparaître.
+                        if (message.layer === 'constellations') {
+                            layer.lines_visible = next;
+                            layer.labels_visible = next;
+                        }
                     }
                 }
                 break;
@@ -569,6 +749,10 @@ function handleMessage(data) {
                 if (message.fov) {
                     stel.core.fov = message.fov * Math.PI / 180;
                 }
+                break;
+
+            case 'setBortle':
+                if (typeof message.value === 'number') applyBortle(message.value);
                 break;
 
             case 'gyroMode':
