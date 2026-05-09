@@ -639,9 +639,12 @@ function updateStarLabels() {
 
         // Compense le roll caméra : sans ça, les labels HTML restent
         // alignés à l'écran tandis que le canvas WebGL tourne avec
-        // l'inclinaison du téléphone → décalage visible.
-        const sxr =  cosRoll * sx + sinRoll * sy;
-        const syr = -sinRoll * sx + cosRoll * sy;
+        // l'inclinaison du téléphone → décalage visible. Le sens de la
+        // rotation est l'inverse de la rotation appliquée par le moteur
+        // au canvas : ses étoiles tournent dans un sens, nos labels les
+        // suivent dans l'autre repère écran.
+        const sxr =  cosRoll * sx - sinRoll * sy;
+        const syr =  sinRoll * sx + cosRoll * sy;
 
         const k = 2 / (1 + cosA);
         const px = w / 2 + sxr * k * focal;
@@ -768,8 +771,8 @@ function updateArrow() {
                  - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
         // Compense le roll caméra (cf. updateStarLabels).
         const cosRoll = Math.cos(camRoll), sinRoll = Math.sin(camRoll);
-        const sxr =  cosRoll * sx + sinRoll * sy;
-        const syr = -sinRoll * sx + cosRoll * sy;
+        const sxr =  cosRoll * sx - sinRoll * sy;
+        const syr =  sinRoll * sx + cosRoll * sy;
         const screenAngle = Math.atan2(-syr, sxr);
 
         arrowEl.style.left = '50%';
