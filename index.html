@@ -22,7 +22,7 @@
             --sirius-text: #E8EAED;
         }
         body { font-family: 'Inter', system-ui, sans-serif; background: var(--sirius-bg); color: var(--sirius-text); overflow: hidden; }
-        #canvas { position: relative; z-index: 1; width: 100vw; height: 100vh; display: block; touch-action: none; mix-blend-mode: lighten; }
+        #canvas { position: relative; z-index: 1; width: 100vw; height: 100vh; display: block; touch-action: none; }
 
         #loading {
             position: absolute; inset: 0;
@@ -148,43 +148,47 @@
         .compass-tick {
             position: absolute;
             top: 0;
-            transform: translateX(-50%);
+            left: 0;
+            transform: translate3d(0, 0, 0);
+            will-change: transform;
             font-family: 'Satoshi', sans-serif;
             white-space: nowrap;
             text-shadow: 0 0 8px rgba(0, 0, 0, 0.95);
+            opacity: 0;
+        }
+        .compass-tick.visible {
+            opacity: 1;
         }
         .compass-tick.major {
-            top: 6px;
             font-weight: 700;
             font-size: 17px;
             letter-spacing: 0.08em;
             color: #ffffff;
+            padding-top: 6px;
         }
         .compass-tick.medium {
-            top: 9px;
             font-weight: 700;
             font-size: 11px;
             letter-spacing: 0.12em;
             color: #ffffff;
+            padding-top: 9px;
         }
         .compass-tick.major::before,
         .compass-tick.medium::before {
             content: '';
             position: absolute;
             left: 50%;
-            transform: translateX(-50%);
+            margin-left: -0.5px;
             width: 1px;
             height: 6px;
             background: rgba(255, 255, 255, 0.45);
         }
-        .compass-tick.major::before { top: -6px; }
-        .compass-tick.medium::before { top: -9px; }
+        .compass-tick.major::before { top: 0; }
+        .compass-tick.medium::before { top: 0; }
         .compass-tick.minor {
-            top: 0;
             width: 1px;
             height: 6px;
             background: rgba(255, 255, 255, 0.45);
-            transform: translateX(-50%);
         }
         #compass-marker {
             position: absolute;
@@ -216,9 +220,10 @@
         .star-label {
             position: absolute;
             left: 0; top: 0;
-            transform: translate(-50%, -180%);
+            transform: translate3d(0, 0, 0);
+            will-change: transform, opacity;
             pointer-events: none;
-            display: none;
+            opacity: 0;
             font-family: 'Satoshi', sans-serif;
             font-weight: 700;
             font-size: 10px;
@@ -228,7 +233,7 @@
             text-shadow: 0 0 6px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.7);
             white-space: nowrap;
         }
-        .star-label.visible { display: block; }
+        .star-label.visible { opacity: 1; }
     </style>
 </head>
 <body>

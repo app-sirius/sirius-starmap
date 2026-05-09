@@ -468,7 +468,7 @@ function buildStarLabels() {
         el.className = 'star-label';
         el.textContent = toFrench(name);
         container.appendChild(el);
-        starLabels.push({ name, obj: null, el });
+        starLabels.push({ name, obj: null, el, _visible: false });
     }
 }
 
@@ -501,7 +501,12 @@ function updateStarLabels() {
         }
     }
     if (isDaytime) {
-        for (const sl of starLabels) sl.el.classList.remove('visible');
+        for (const sl of starLabels) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+        }
         return;
     }
 
@@ -521,27 +526,54 @@ function updateStarLabels() {
             sl.obj = resolveObject(sl.name);
             if (sl.obj) sl.designations = sl.obj.designations() || [];
         }
-        if (!sl.obj) { sl.el.classList.remove('visible'); continue; }
+        if (!sl.obj) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
         // Si le moteur a déjà sélectionné cette étoile (tap utilisateur),
         // il dessine son propre label : on masque le nôtre pour éviter la
         // superposition.
         if (selectedDesignations && sl.designations &&
             sl.designations.some(d => selectedDesignations.includes(d))) {
-            sl.el.classList.remove('visible');
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
             continue;
         }
         const pIcrf = sl.obj.getInfo('radec', obs);
-        if (!pIcrf) { sl.el.classList.remove('visible'); continue; }
+        if (!pIcrf) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
         const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', pIcrf);
         const [objAz, objAlt] = stel.c2s(pObs);
 
-        if (objAlt <= 0) { sl.el.classList.remove('visible'); continue; }
+        if (objAlt <= 0) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
 
         const dAz = stel.anpm(objAz - camAz);
         const cosA = Math.sin(camAlt) * Math.sin(objAlt)
                    + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
         // cosA = -1 (astre derrière, antipode) → singularité de la projection
-        if (cosA <= -0.999) { sl.el.classList.remove('visible'); continue; }
+        if (cosA <= -0.999) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
 
         const sx = Math.sin(dAz) * Math.cos(objAlt);
         const sy = Math.sin(objAlt) * Math.cos(camAlt)
@@ -558,13 +590,19 @@ function updateStarLabels() {
         const py = h / 2 - syr * k * focal;
 
         if (px < -margin || px > w + margin || py < -margin || py > h + margin) {
-            sl.el.classList.remove('visible');
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
             continue;
         }
 
-        sl.el.style.left = px + 'px';
-        sl.el.style.top = py + 'px';
-        sl.el.classList.add('visible');
+        // -50%, -180% replaces the static CSS transform we removed.
+        sl.el.style.transform = `translate3d(${px}px, ${py}px, 0) translate(-50%, -180%)`;
+        if (sl._visible !== true) {
+            sl.el.classList.add('visible');
+            sl._visible = true;
+        }
     }
 }
 
@@ -611,12 +649,20 @@ function updateCompass() {
         const tickAz = parseFloat(el.dataset.az) * Math.PI / 180;
         const dAz = stel.anpm(tickAz - camAz);
         if (Math.abs(dAz) > halfSpan) {
-            el.style.display = 'none';
+            if (el._visible !== false) {
+                el.classList.remove('visible');
+                el._visible = false;
+            }
             continue;
         }
         const x = (dAz / COMPASS_SPAN_RAD + 0.5) * w;
-        el.style.display = 'block';
-        el.style.left = x + 'px';
+        // translateX only; the original `left: 0` baseline is in CSS.
+        // -50% keeps tick centered on its azimuth (was `transform: translateX(-50%)` in CSS).
+        el.style.transform = `translate3d(${x}px, 0, 0) translateX(-50%)`;
+        if (el._visible !== true) {
+            el.classList.add('visible');
+            el._visible = true;
+        }
     }
 
     const deg = ((camAz * 180 / Math.PI) % 360 + 360) % 360;
