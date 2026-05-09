@@ -30,6 +30,17 @@ let sunObj = null;
 let isDaytime = false;
 let lastSunCheckMs = 0;
 const SUN_CHECK_INTERVAL_MS = 2000;
+// updateStarLabels throttle + immobility short-circuit. The camera frame
+// rate is 60 Hz but a 10 px label only needs ~20 Hz worth of correction.
+const STAR_LABELS_INTERVAL_MS = 50;
+let lastStarLabelsMs = 0;
+let lastStarLabelsCamYaw = NaN;
+let lastStarLabelsCamPitch = NaN;
+let lastStarLabelsCamRoll = NaN;
+let lastStarLabelsFov = NaN;
+// Threshold below which the camera is "still". 0.05° ~= 0.001 rad — well
+// below visible label drift on a phone screen.
+const CAM_STILL_EPS = 0.001;
 // Désignations de l'objet actuellement sélectionné par le moteur (tap).
 // On l'utilise pour masquer NOTRE label HTML quand le moteur dessine déjà
 // son propre label de sélection (sinon superposition visuelle).
@@ -500,13 +511,20 @@ function buildStarLabels() {
 // ou hors écran.
 function updateStarLabels() {
     if (!stel || !starLabels.length) return;
-    const obs = stel.core.observer;
 
-    // Jour ? Si le Soleil est plus haut que le crépuscule civil (-6°),
-    // le ciel est trop clair pour distinguer les étoiles à l'œil → on
-    // masque tous nos labels. Throttlé : le Soleil bouge ~0.25°/min,
-    // recalculer à chaque frame est inutile.
     const now = Date.now();
+    if (now - lastStarLabelsMs < STAR_LABELS_INTERVAL_MS) return;
+
+    const obs = stel.core.observer;
+    const camAz = obs.yaw;
+    const camAlt = obs.pitch;
+    const camRoll = obs.roll || 0;
+    const fov = stel.core.fov;
+
+    // Camera-immobility: if yaw/pitch/roll/fov haven't moved meaningfully
+    // since the last update AND the daytime flag is unchanged, skip — the
+    // labels are already where they should be.
+    const wasDay = isDaytime;
     if (now - lastSunCheckMs > SUN_CHECK_INTERVAL_MS) {
         lastSunCheckMs = now;
         if (!sunObj) sunObj = stel.getObj('Sun') || stel.getObj('NAME Sun');
@@ -520,21 +538,37 @@ function updateStarLabels() {
         }
     }
     if (isDaytime) {
-        for (const sl of starLabels) {
-            if (sl._visible !== false) {
-                sl.el.classList.remove('visible');
-                sl._visible = false;
+        if (!wasDay || lastStarLabelsCamYaw !== lastStarLabelsCamYaw /* NaN */) {
+            for (const sl of starLabels) {
+                if (sl._visible !== false) {
+                    sl.el.classList.remove('visible');
+                    sl._visible = false;
+                }
             }
         }
+        lastStarLabelsMs = now;
         return;
     }
 
-    const camAz = obs.yaw;
-    const camAlt = obs.pitch;
-    const camRoll = obs.roll || 0;
+    const stillYaw = Math.abs(stel.anpm(camAz - lastStarLabelsCamYaw)) < CAM_STILL_EPS;
+    const stillPitch = Math.abs(camAlt - lastStarLabelsCamPitch) < CAM_STILL_EPS;
+    const stillRoll = Math.abs(stel.anpm(camRoll - lastStarLabelsCamRoll)) < CAM_STILL_EPS;
+    const stillFov = Math.abs(fov - lastStarLabelsFov) < CAM_STILL_EPS;
+    const stillDay = wasDay === isDaytime;
+    if (stillYaw && stillPitch && stillRoll && stillFov && stillDay
+        && lastStarLabelsCamYaw === lastStarLabelsCamYaw /* not NaN */) {
+        lastStarLabelsMs = now;
+        return;
+    }
+    lastStarLabelsCamYaw = camAz;
+    lastStarLabelsCamPitch = camAlt;
+    lastStarLabelsCamRoll = camRoll;
+    lastStarLabelsFov = fov;
+    lastStarLabelsMs = now;
+
     const cosRoll = Math.cos(camRoll);
     const sinRoll = Math.sin(camRoll);
-    const halfFov = stel.core.fov / 2;
+    const halfFov = fov / 2;
     const w = window.innerWidth;
     const h = window.innerHeight;
     const focal = (Math.min(w, h) / 2) / (2 * Math.tan(halfFov / 2));
@@ -563,15 +597,20 @@ function updateStarLabels() {
             }
             continue;
         }
-        const pIcrf = sl.obj.getInfo('radec', obs);
-        if (!pIcrf) {
-            if (sl._visible !== false) {
-                sl.el.classList.remove('visible');
-                sl._visible = false;
+        // ICRF position of a star is essentially constant over a session
+        // (proper motion is sub-arcsec/year). Cache once at first resolve;
+        // only the observer-frame conversion depends on time/observer.
+        if (!sl.pIcrf) {
+            sl.pIcrf = sl.obj.getInfo('radec', obs);
+            if (!sl.pIcrf) {
+                if (sl._visible !== false) {
+                    sl.el.classList.remove('visible');
+                    sl._visible = false;
+                }
+                continue;
             }
-            continue;
         }
-        const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', pIcrf);
+        const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);
         const [objAz, objAlt] = stel.c2s(pObs);
 
         if (objAlt <= 0) {
