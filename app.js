@@ -183,35 +183,40 @@ async function initStellarium() {
 
         const baseUrl = '/data/';
         const starsPack = 'swe-data-packs/base/2020-09-01/base_2020-09-01_1aa210df';
-        // On ne charge QUE le pack `minimal` (mag −1 → 7) : ce sont les
-        // étoiles brillantes utilisées dans les constellations (HIP).
-        // Les packs `base` (7 → 8) et `extended` (8 → 11.5) noyaient le
-        // ciel d'étoiles faibles. À rajouter si on veut un ciel dense.
+
+        // CRITICAL — needed for the first night-sky frame at FOV 60°.
         stel.core.stars.addDataSource({ url: baseUrl + 'swe-data-packs/minimal/2020-09-01/minimal_2020-09-01_186e7ee2/stars', key: 'minimal' });
         stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/western', key: 'western' });
         stel.core.dsos.addDataSource({ url: baseUrl + starsPack + '/dso' });
-        // stel.core.landscapes.addDataSource({ url: baseUrl + 'landscapes/v1/guereins', key: 'guereins' });
         stel.core.landscapes.addDataSource({ url: '/landscapes/mylandscape', key: 'mine' });
         stel.core.milkyway.addDataSource({ url: baseUrl + 'surveys/milkyway/v1' });
-        stel.core.dss.addDataSource({ url: baseUrl + 'surveys/dss/v1' });
-        stel.core.minor_planets.addDataSource({ url: baseUrl + 'mpc/v1/mpcorb.dat', key: 'mpc_asteroids' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/default/v1', key: 'default' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/sun/v1',      key: 'sun' });
+        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon/v1',     key: 'moon' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/mercury/v1',  key: 'mercury' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/venus/v1',    key: 'venus' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon/v1',     key: 'moon' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon-normal/v1', key: 'moon-normal' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/mars/v1',     key: 'mars' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/jupiter/v1',  key: 'jupiter' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/io/v1',       key: 'io' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/europa/v1',   key: 'europa' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/ganymede/v1', key: 'ganymede' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/callisto/v1', key: 'callisto' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/saturn/v1',   key: 'saturn' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/uranus/v1',   key: 'uranus' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/neptune/v1',  key: 'neptune' });
-        stel.core.comets.addDataSource({ url: baseUrl + 'mpc/v1/CometEls.txt', key: 'mpc_comets' });
-        stel.core.satellites.addDataSource({ url: baseUrl + 'skysources/v1/tle_satellite.jsonl.gz', key: 'jsonl/sat' });
+
+        // DEFERRED — only useful at deep zoom or for niche features. Loaded
+        // after the first `ready` event + idle, so they never delay TTI.
+        const loadDeferredDataSources = () => {
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon-normal/v1', key: 'moon-normal' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/io/v1',       key: 'io' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/europa/v1',   key: 'europa' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/ganymede/v1', key: 'ganymede' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/callisto/v1', key: 'callisto' });
+            stel.core.minor_planets.addDataSource({ url: baseUrl + 'mpc/v1/mpcorb.dat', key: 'mpc_asteroids' });
+            stel.core.comets.addDataSource({ url: baseUrl + 'mpc/v1/CometEls.txt', key: 'mpc_comets' });
+            stel.core.satellites.addDataSource({ url: baseUrl + 'skysources/v1/tle_satellite.jsonl.gz', key: 'jsonl/sat' });
+            // DSS tiles only become useful below ~2° FOV. Leave the data
+            // source registered (so toggling visible flips the tile loading
+            // on demand) but keep `dss.visible = false` until zoomed in.
+            stel.core.dss.addDataSource({ url: baseUrl + 'surveys/dss/v1' });
+        };
 
         stel.core.observer.latitude = 48.8566 * Math.PI / 180;
         stel.core.observer.longitude = 2.3522 * Math.PI / 180;
@@ -270,9 +275,10 @@ async function initStellarium() {
         // l'effet flagrant ; le natif réajuste via `setBortle`.
         applyBortle(1);
 
-        // DSS : couche de tuiles photo du ciel (Digital Sky Survey), donne
-        // les vraies textures des nébuleuses/galaxies au zoom poussé.
-        stel.core.dss.visible = true;
+        // DSS = Digital Sky Survey tiles (photographic). Only useful at
+        // very small FOV; leaving it on at 60° loads heavy tiles for
+        // pixels the user can't see. Toggled in updateOverlay based on FOV.
+        stel.core.dss.visible = false;
 
         // Constellations : lignes uniquement (pas de labels, pas d'images
         // mythologiques, pas de frontières) — comme la conf Stellarium
@@ -355,6 +361,13 @@ async function initStellarium() {
         const params = new URLSearchParams(window.location.search);
         const target = params.get('target') || (params.keys().next().value || null);
         if (target) pointAt(target);
+
+        // Hydrate non-critical surveys after the first paint settles.
+        // requestIdleCallback is not on every WebView; setTimeout fallback.
+        const idle = window.requestIdleCallback
+            ? (cb) => window.requestIdleCallback(cb, { timeout: 3000 })
+            : (cb) => setTimeout(cb, 800);
+        idle(loadDeferredDataSources);
 
         requestAnimationFrame(updateOverlay);
 
@@ -446,9 +459,15 @@ function guideTo(name) {
     sendToReactNative({ type: 'lookAtSuccess', target: name });
 }
 
+const DSS_FOV_THRESHOLD_RAD = 2 * Math.PI / 180; // enable DSS tiles when zoomed past ~2°
+
 function updateOverlay() {
     if (stel) {
         stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        const wantDss = stel.core.fov < DSS_FOV_THRESHOLD_RAD;
+        if (stel.core.dss && stel.core.dss.visible !== wantDss) {
+            stel.core.dss.visible = wantDss;
+        }
         updateArrow();
         updateCompass();
         updateStarLabels();
