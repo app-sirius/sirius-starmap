@@ -800,6 +800,13 @@ function handleMessage(data) {
                 if (typeof message.roll === 'number' && 'roll' in stel.core.observer) {
                     stel.core.observer.roll = message.roll;
                 }
+                // Sans update(), le moteur rend avec un cache interne de matrices
+                // qui peut désynchroniser le canvas (rendu avec roll N) et notre
+                // overlay (qui lit obs.roll = N+1 au prochain frame). Résultat :
+                // labels HTML décalés des étoiles canvas pendant les rotations.
+                if (typeof stel.core.observer.update === 'function') {
+                    stel.core.observer.update();
+                }
                 break;
                 
             case 'location':
