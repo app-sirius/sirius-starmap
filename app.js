@@ -30,10 +30,9 @@ let sunObj = null;
 let isDaytime = false;
 let lastSunCheckMs = 0;
 const SUN_CHECK_INTERVAL_MS = 2000;
-// updateStarLabels throttle + immobility short-circuit. The camera frame
-// rate is 60 Hz but a 10 px label only needs ~20 Hz worth of correction.
-const STAR_LABELS_INTERVAL_MS = 50;
-let lastStarLabelsMs = 0;
+// updateStarLabels short-circuit "caméra immobile" : on saute toute la
+// boucle quand yaw/pitch/roll/fov n'ont pas bougé depuis la dernière MAJ.
+// NaN à l'init = "jamais calculé" → la 1re frame fait toujours un update.
 let lastStarLabelsCamYaw = NaN;
 let lastStarLabelsCamPitch = NaN;
 let lastStarLabelsCamRoll = NaN;
@@ -512,8 +511,12 @@ function buildStarLabels() {
 function updateStarLabels() {
     if (!stel || !starLabels.length) return;
 
+    // Note: pas de throttle temporel ici. Le moteur dessine les étoiles à
+    // 60 fps ; capper nos labels HTML plus bas crée un décalage visible
+    // pendant les pans rapides (les étoiles bougent, les noms suivent en
+    // saccades). Le court-circuit "caméra immobile" plus bas + le cache
+    // sl.pIcrf suffisent à éliminer le coût quand rien ne change.
     const now = Date.now();
-    if (now - lastStarLabelsMs < STAR_LABELS_INTERVAL_MS) return;
 
     const obs = stel.core.observer;
     const camAz = obs.yaw;
@@ -546,7 +549,6 @@ function updateStarLabels() {
                 }
             }
         }
-        lastStarLabelsMs = now;
         return;
     }
 
@@ -557,14 +559,12 @@ function updateStarLabels() {
     const stillDay = wasDay === isDaytime;
     if (stillYaw && stillPitch && stillRoll && stillFov && stillDay
         && lastStarLabelsCamYaw === lastStarLabelsCamYaw /* not NaN */) {
-        lastStarLabelsMs = now;
         return;
     }
     lastStarLabelsCamYaw = camAz;
     lastStarLabelsCamPitch = camAlt;
     lastStarLabelsCamRoll = camRoll;
     lastStarLabelsFov = fov;
-    lastStarLabelsMs = now;
 
     const cosRoll = Math.cos(camRoll);
     const sinRoll = Math.sin(camRoll);
