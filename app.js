@@ -30,6 +30,16 @@ let sunObj = null;
 let isDaytime = false;
 let lastSunCheckMs = 0;
 const SUN_CHECK_INTERVAL_MS = 2000;
+// updateStarLabels short-circuit "caméra immobile" : on saute toute la
+// boucle quand yaw/pitch/roll/fov n'ont pas bougé depuis la dernière MAJ.
+// NaN à l'init = "jamais calculé" → la 1re frame fait toujours un update.
+let lastStarLabelsCamYaw = NaN;
+let lastStarLabelsCamPitch = NaN;
+let lastStarLabelsCamRoll = NaN;
+let lastStarLabelsFov = NaN;
+// Threshold below which the camera is "still". 0.05° ~= 0.001 rad — well
+// below visible label drift on a phone screen.
+const CAM_STILL_EPS = 0.001;
 // Désignations de l'objet actuellement sélectionné par le moteur (tap).
 // On l'utilise pour masquer NOTRE label HTML quand le moteur dessine déjà
 // son propre label de sélection (sinon superposition visuelle).
@@ -183,35 +193,40 @@ async function initStellarium() {
 
         const baseUrl = '/data/';
         const starsPack = 'swe-data-packs/base/2020-09-01/base_2020-09-01_1aa210df';
-        // On ne charge QUE le pack `minimal` (mag −1 → 7) : ce sont les
-        // étoiles brillantes utilisées dans les constellations (HIP).
-        // Les packs `base` (7 → 8) et `extended` (8 → 11.5) noyaient le
-        // ciel d'étoiles faibles. À rajouter si on veut un ciel dense.
+
+        // CRITICAL — needed for the first night-sky frame at FOV 60°.
         stel.core.stars.addDataSource({ url: baseUrl + 'swe-data-packs/minimal/2020-09-01/minimal_2020-09-01_186e7ee2/stars', key: 'minimal' });
         stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/western', key: 'western' });
         stel.core.dsos.addDataSource({ url: baseUrl + starsPack + '/dso' });
-        // stel.core.landscapes.addDataSource({ url: baseUrl + 'landscapes/v1/guereins', key: 'guereins' });
         stel.core.landscapes.addDataSource({ url: '/landscapes/mylandscape', key: 'mine' });
         stel.core.milkyway.addDataSource({ url: baseUrl + 'surveys/milkyway/v1' });
-        stel.core.dss.addDataSource({ url: baseUrl + 'surveys/dss/v1' });
-        stel.core.minor_planets.addDataSource({ url: baseUrl + 'mpc/v1/mpcorb.dat', key: 'mpc_asteroids' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/default/v1', key: 'default' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/sun/v1',      key: 'sun' });
+        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon/v1',     key: 'moon' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/mercury/v1',  key: 'mercury' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/venus/v1',    key: 'venus' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon/v1',     key: 'moon' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon-normal/v1', key: 'moon-normal' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/mars/v1',     key: 'mars' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/jupiter/v1',  key: 'jupiter' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/io/v1',       key: 'io' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/europa/v1',   key: 'europa' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/ganymede/v1', key: 'ganymede' });
-        stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/callisto/v1', key: 'callisto' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/saturn/v1',   key: 'saturn' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/uranus/v1',   key: 'uranus' });
         stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/neptune/v1',  key: 'neptune' });
-        stel.core.comets.addDataSource({ url: baseUrl + 'mpc/v1/CometEls.txt', key: 'mpc_comets' });
-        stel.core.satellites.addDataSource({ url: baseUrl + 'skysources/v1/tle_satellite.jsonl.gz', key: 'jsonl/sat' });
+
+        // DEFERRED — only useful at deep zoom or for niche features. Loaded
+        // after the first `ready` event + idle, so they never delay TTI.
+        const loadDeferredDataSources = () => {
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/moon-normal/v1', key: 'moon-normal' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/io/v1',       key: 'io' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/europa/v1',   key: 'europa' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/ganymede/v1', key: 'ganymede' });
+            stel.core.planets.addDataSource({ url: baseUrl + 'surveys/sso/callisto/v1', key: 'callisto' });
+            stel.core.minor_planets.addDataSource({ url: baseUrl + 'mpc/v1/mpcorb.dat', key: 'mpc_asteroids' });
+            stel.core.comets.addDataSource({ url: baseUrl + 'mpc/v1/CometEls.txt', key: 'mpc_comets' });
+            stel.core.satellites.addDataSource({ url: baseUrl + 'skysources/v1/tle_satellite.jsonl.gz', key: 'jsonl/sat' });
+            // DSS tiles only become useful below ~2° FOV. Leave the data
+            // source registered (so toggling visible flips the tile loading
+            // on demand) but keep `dss.visible = false` until zoomed in.
+            stel.core.dss.addDataSource({ url: baseUrl + 'surveys/dss/v1' });
+        };
 
         stel.core.observer.latitude = 48.8566 * Math.PI / 180;
         stel.core.observer.longitude = 2.3522 * Math.PI / 180;
@@ -270,9 +285,10 @@ async function initStellarium() {
         // l'effet flagrant ; le natif réajuste via `setBortle`.
         applyBortle(1);
 
-        // DSS : couche de tuiles photo du ciel (Digital Sky Survey), donne
-        // les vraies textures des nébuleuses/galaxies au zoom poussé.
-        stel.core.dss.visible = true;
+        // DSS = Digital Sky Survey tiles (photographic). Only useful at
+        // very small FOV; leaving it on at 60° loads heavy tiles for
+        // pixels the user can't see. Toggled in updateOverlay based on FOV.
+        stel.core.dss.visible = false;
 
         // Constellations : lignes uniquement (pas de labels, pas d'images
         // mythologiques, pas de frontières) — comme la conf Stellarium
@@ -355,6 +371,13 @@ async function initStellarium() {
         const params = new URLSearchParams(window.location.search);
         const target = params.get('target') || (params.keys().next().value || null);
         if (target) pointAt(target);
+
+        // Hydrate non-critical surveys after the first paint settles.
+        // requestIdleCallback is not on every WebView; setTimeout fallback.
+        const idle = window.requestIdleCallback
+            ? (cb) => window.requestIdleCallback(cb, { timeout: 3000 })
+            : (cb) => setTimeout(cb, 800);
+        idle(loadDeferredDataSources);
 
         requestAnimationFrame(updateOverlay);
 
@@ -446,9 +469,15 @@ function guideTo(name) {
     sendToReactNative({ type: 'lookAtSuccess', target: name });
 }
 
+const DSS_FOV_THRESHOLD_RAD = 2 * Math.PI / 180; // enable DSS tiles when zoomed past ~2°
+
 function updateOverlay() {
     if (stel) {
         stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        const wantDss = stel.core.fov < DSS_FOV_THRESHOLD_RAD;
+        if (stel.core.dss && stel.core.dss.visible !== wantDss) {
+            stel.core.dss.visible = wantDss;
+        }
         updateArrow();
         updateCompass();
         updateStarLabels();
@@ -468,7 +497,7 @@ function buildStarLabels() {
         el.className = 'star-label';
         el.textContent = toFrench(name);
         container.appendChild(el);
-        starLabels.push({ name, obj: null, el });
+        starLabels.push({ name, obj: null, el, _visible: false });
     }
 }
 
@@ -481,13 +510,24 @@ function buildStarLabels() {
 // ou hors écran.
 function updateStarLabels() {
     if (!stel || !starLabels.length) return;
-    const obs = stel.core.observer;
 
-    // Jour ? Si le Soleil est plus haut que le crépuscule civil (-6°),
-    // le ciel est trop clair pour distinguer les étoiles à l'œil → on
-    // masque tous nos labels. Throttlé : le Soleil bouge ~0.25°/min,
-    // recalculer à chaque frame est inutile.
+    // Note: pas de throttle temporel ici. Le moteur dessine les étoiles à
+    // 60 fps ; capper nos labels HTML plus bas crée un décalage visible
+    // pendant les pans rapides (les étoiles bougent, les noms suivent en
+    // saccades). Le court-circuit "caméra immobile" plus bas + le cache
+    // sl.pIcrf suffisent à éliminer le coût quand rien ne change.
     const now = Date.now();
+
+    const obs = stel.core.observer;
+    const camAz = obs.yaw;
+    const camAlt = obs.pitch;
+    const camRoll = obs.roll || 0;
+    const fov = stel.core.fov;
+
+    // Camera-immobility: if yaw/pitch/roll/fov haven't moved meaningfully
+    // since the last update AND the daytime flag is unchanged, skip — the
+    // labels are already where they should be.
+    const wasDay = isDaytime;
     if (now - lastSunCheckMs > SUN_CHECK_INTERVAL_MS) {
         lastSunCheckMs = now;
         if (!sunObj) sunObj = stel.getObj('Sun') || stel.getObj('NAME Sun');
@@ -501,16 +541,34 @@ function updateStarLabels() {
         }
     }
     if (isDaytime) {
-        for (const sl of starLabels) sl.el.classList.remove('visible');
+        if (!wasDay || lastStarLabelsCamYaw !== lastStarLabelsCamYaw /* NaN */) {
+            for (const sl of starLabels) {
+                if (sl._visible !== false) {
+                    sl.el.classList.remove('visible');
+                    sl._visible = false;
+                }
+            }
+        }
         return;
     }
 
-    const camAz = obs.yaw;
-    const camAlt = obs.pitch;
-    const camRoll = obs.roll || 0;
+    const stillYaw = Math.abs(stel.anpm(camAz - lastStarLabelsCamYaw)) < CAM_STILL_EPS;
+    const stillPitch = Math.abs(camAlt - lastStarLabelsCamPitch) < CAM_STILL_EPS;
+    const stillRoll = Math.abs(stel.anpm(camRoll - lastStarLabelsCamRoll)) < CAM_STILL_EPS;
+    const stillFov = Math.abs(fov - lastStarLabelsFov) < CAM_STILL_EPS;
+    const stillDay = wasDay === isDaytime;
+    if (stillYaw && stillPitch && stillRoll && stillFov && stillDay
+        && lastStarLabelsCamYaw === lastStarLabelsCamYaw /* not NaN */) {
+        return;
+    }
+    lastStarLabelsCamYaw = camAz;
+    lastStarLabelsCamPitch = camAlt;
+    lastStarLabelsCamRoll = camRoll;
+    lastStarLabelsFov = fov;
+
     const cosRoll = Math.cos(camRoll);
     const sinRoll = Math.sin(camRoll);
-    const halfFov = stel.core.fov / 2;
+    const halfFov = fov / 2;
     const w = window.innerWidth;
     const h = window.innerHeight;
     const focal = (Math.min(w, h) / 2) / (2 * Math.tan(halfFov / 2));
@@ -521,27 +579,59 @@ function updateStarLabels() {
             sl.obj = resolveObject(sl.name);
             if (sl.obj) sl.designations = sl.obj.designations() || [];
         }
-        if (!sl.obj) { sl.el.classList.remove('visible'); continue; }
+        if (!sl.obj) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
         // Si le moteur a déjà sélectionné cette étoile (tap utilisateur),
         // il dessine son propre label : on masque le nôtre pour éviter la
         // superposition.
         if (selectedDesignations && sl.designations &&
             sl.designations.some(d => selectedDesignations.includes(d))) {
-            sl.el.classList.remove('visible');
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
             continue;
         }
-        const pIcrf = sl.obj.getInfo('radec', obs);
-        if (!pIcrf) { sl.el.classList.remove('visible'); continue; }
-        const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', pIcrf);
+        // ICRF position of a star is essentially constant over a session
+        // (proper motion is sub-arcsec/year). Cache once at first resolve;
+        // only the observer-frame conversion depends on time/observer.
+        if (!sl.pIcrf) {
+            sl.pIcrf = sl.obj.getInfo('radec', obs);
+            if (!sl.pIcrf) {
+                if (sl._visible !== false) {
+                    sl.el.classList.remove('visible');
+                    sl._visible = false;
+                }
+                continue;
+            }
+        }
+        const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);
         const [objAz, objAlt] = stel.c2s(pObs);
 
-        if (objAlt <= 0) { sl.el.classList.remove('visible'); continue; }
+        if (objAlt <= 0) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
 
         const dAz = stel.anpm(objAz - camAz);
         const cosA = Math.sin(camAlt) * Math.sin(objAlt)
                    + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
         // cosA = -1 (astre derrière, antipode) → singularité de la projection
-        if (cosA <= -0.999) { sl.el.classList.remove('visible'); continue; }
+        if (cosA <= -0.999) {
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
+            continue;
+        }
 
         const sx = Math.sin(dAz) * Math.cos(objAlt);
         const sy = Math.sin(objAlt) * Math.cos(camAlt)
@@ -549,22 +639,31 @@ function updateStarLabels() {
 
         // Compense le roll caméra : sans ça, les labels HTML restent
         // alignés à l'écran tandis que le canvas WebGL tourne avec
-        // l'inclinaison du téléphone → décalage visible.
-        const sxr =  cosRoll * sx + sinRoll * sy;
-        const syr = -sinRoll * sx + cosRoll * sy;
+        // l'inclinaison du téléphone → décalage visible. Le sens de la
+        // rotation est l'inverse de la rotation appliquée par le moteur
+        // au canvas : ses étoiles tournent dans un sens, nos labels les
+        // suivent dans l'autre repère écran.
+        const sxr =  cosRoll * sx - sinRoll * sy;
+        const syr =  sinRoll * sx + cosRoll * sy;
 
         const k = 2 / (1 + cosA);
         const px = w / 2 + sxr * k * focal;
         const py = h / 2 - syr * k * focal;
 
         if (px < -margin || px > w + margin || py < -margin || py > h + margin) {
-            sl.el.classList.remove('visible');
+            if (sl._visible !== false) {
+                sl.el.classList.remove('visible');
+                sl._visible = false;
+            }
             continue;
         }
 
-        sl.el.style.left = px + 'px';
-        sl.el.style.top = py + 'px';
-        sl.el.classList.add('visible');
+        // -50%, -180% replaces the static CSS transform we removed.
+        sl.el.style.transform = `translate3d(${px}px, ${py}px, 0) translate(-50%, -180%)`;
+        if (sl._visible !== true) {
+            sl.el.classList.add('visible');
+            sl._visible = true;
+        }
     }
 }
 
@@ -611,12 +710,20 @@ function updateCompass() {
         const tickAz = parseFloat(el.dataset.az) * Math.PI / 180;
         const dAz = stel.anpm(tickAz - camAz);
         if (Math.abs(dAz) > halfSpan) {
-            el.style.display = 'none';
+            if (el._visible !== false) {
+                el.classList.remove('visible');
+                el._visible = false;
+            }
             continue;
         }
         const x = (dAz / COMPASS_SPAN_RAD + 0.5) * w;
-        el.style.display = 'block';
-        el.style.left = x + 'px';
+        // translateX only; the original `left: 0` baseline is in CSS.
+        // -50% keeps tick centered on its azimuth (was `transform: translateX(-50%)` in CSS).
+        el.style.transform = `translate3d(${x}px, 0, 0) translateX(-50%)`;
+        if (el._visible !== true) {
+            el.classList.add('visible');
+            el._visible = true;
+        }
     }
 
     const deg = ((camAz * 180 / Math.PI) % 360 + 360) % 360;
@@ -664,8 +771,8 @@ function updateArrow() {
                  - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
         // Compense le roll caméra (cf. updateStarLabels).
         const cosRoll = Math.cos(camRoll), sinRoll = Math.sin(camRoll);
-        const sxr =  cosRoll * sx + sinRoll * sy;
-        const syr = -sinRoll * sx + cosRoll * sy;
+        const sxr =  cosRoll * sx - sinRoll * sy;
+        const syr =  sinRoll * sx + cosRoll * sy;
         const screenAngle = Math.atan2(-syr, sxr);
 
         arrowEl.style.left = '50%';
@@ -695,6 +802,13 @@ function handleMessage(data) {
                 if (typeof message.pitch === 'number') stel.core.observer.pitch = message.pitch;
                 if (typeof message.roll === 'number' && 'roll' in stel.core.observer) {
                     stel.core.observer.roll = message.roll;
+                }
+                // Sans update(), le moteur rend avec un cache interne de matrices
+                // qui peut désynchroniser le canvas (rendu avec roll N) et notre
+                // overlay (qui lit obs.roll = N+1 au prochain frame). Résultat :
+                // labels HTML décalés des étoiles canvas pendant les rotations.
+                if (typeof stel.core.observer.update === 'function') {
+                    stel.core.observer.update();
                 }
                 break;
                 
