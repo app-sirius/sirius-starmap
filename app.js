@@ -91,7 +91,7 @@ const FR_NAMES = {
     'Libra': 'Balance', 'Andromeda': 'Andromède', 'Perseus': 'Persée',
     'Auriga': 'Cocher', 'Cygnus': 'Cygne', 'Lyra': 'Lyre',
     'Aquila': 'Aigle', 'Pegasus': 'Pégase', 'Hercules': 'Hercule',
-    'Bootes': 'Bouvier', 'Canis Major': 'Grand Chien', 'Canis Minor': 'Petit Chien',
+    'Bootes': 'Bouvier', 'Boötes': 'Bouvier', 'Canis Major': 'Grand Chien', 'Canis Minor': 'Petit Chien',
     'Draco': 'Dragon', 'Hydra': 'Hydre',
     'Centaurus': 'Centaure', 'Crux': 'Croix du Sud',
     'Carina': 'Carène', 'Vela': 'Voiles', 'Puppis': 'Poupe',
@@ -112,6 +112,7 @@ const FR_NAMES = {
     'Pictor': 'Peintre', 'Piscis Austrinus': 'Poisson austral',
     'Pyxis': 'Boussole', 'Reticulum': 'Réticule', 'Sagitta': 'Flèche',
     'Sculptor': 'Sculpteur', 'Scutum': 'Écu de Sobieski',
+    'Cepheus': 'Céphée', 'Cetus': 'Baleine', 'Hydrus': 'Petite Hydre',
     'Serpens': 'Serpent', 'Sextans': 'Sextant', 'Telescopium': 'Télescope',
     'Triangulum': 'Triangle', 'Triangulum Australe': 'Triangle austral',
     'Tucana': 'Toucan', 'Volans': 'Poisson volant', 'Vulpecula': 'Petit Renard',
@@ -167,6 +168,51 @@ const TRANSLATIONS = { ...FR_NAMES, ...FR_UI };
 const REV_NAMES = Object.fromEntries(
     Object.entries(FR_NAMES).map(([en, fr]) => [fr, en])
 );
+
+// Mappe l'abbréviation IAU 3-lettres d'une constellation vers son nom latin
+// canonique. Le moteur retourne des designations type "CON western UMa" mais
+// jamais de prefixe "NAME ", donc sans cette table le popup affichait l'ID
+// brut ("CON western UMa") au lieu d'un nom utilisable par toFrench() et la
+// recherche Wikipedia.
+const CONSTELLATION_BY_IAU = {
+    And: 'Andromeda', Ant: 'Antlia', Aps: 'Apus', Aqr: 'Aquarius',
+    Aql: 'Aquila', Ara: 'Ara', Ari: 'Aries', Aur: 'Auriga',
+    Boo: 'Bootes', Cae: 'Caelum', Cam: 'Camelopardalis', Cnc: 'Cancer',
+    CVn: 'Canes Venatici', CMa: 'Canis Major', CMi: 'Canis Minor',
+    Cap: 'Capricornus', Car: 'Carina', Cas: 'Cassiopeia',
+    Cen: 'Centaurus', Cep: 'Cepheus', Cet: 'Cetus',
+    Cha: 'Chamaeleon', Cir: 'Circinus', Col: 'Columba',
+    Com: 'Coma Berenices', CrA: 'Corona Australis', CrB: 'Corona Borealis',
+    Crv: 'Corvus', Crt: 'Crater', Cru: 'Crux', Cyg: 'Cygnus',
+    Del: 'Delphinus', Dor: 'Dorado', Dra: 'Draco', Equ: 'Equuleus',
+    Eri: 'Eridanus', For: 'Fornax', Gem: 'Gemini', Gru: 'Grus',
+    Her: 'Hercules', Hor: 'Horologium', Hya: 'Hydra', Hyi: 'Hydrus',
+    Ind: 'Indus', Lac: 'Lacerta', Leo: 'Leo', LMi: 'Leo Minor',
+    Lep: 'Lepus', Lib: 'Libra', Lup: 'Lupus', Lyn: 'Lynx', Lyr: 'Lyra',
+    Men: 'Mensa', Mic: 'Microscopium', Mon: 'Monoceros', Mus: 'Musca',
+    Nor: 'Norma', Oct: 'Octans', Oph: 'Ophiuchus', Ori: 'Orion',
+    Pav: 'Pavo', Peg: 'Pegasus', Per: 'Perseus', Phe: 'Phoenix',
+    Pic: 'Pictor', Psc: 'Pisces', PsA: 'Piscis Austrinus',
+    Pup: 'Puppis', Pyx: 'Pyxis', Ret: 'Reticulum', Sge: 'Sagitta',
+    Sgr: 'Sagittarius', Sco: 'Scorpius', Scl: 'Sculptor', Sct: 'Scutum',
+    Ser: 'Serpens', Sex: 'Sextans', Tau: 'Taurus', Tel: 'Telescopium',
+    Tri: 'Triangulum', TrA: 'Triangulum Australe', Tuc: 'Tucana',
+    UMa: 'Ursa Major', UMi: 'Ursa Minor', Vel: 'Vela', Vir: 'Virgo',
+    Vol: 'Volans', Vul: 'Vulpecula',
+};
+
+// Renvoie le nom latin d'une constellation à partir de ses designations
+// (ex. ["CON western UMa"] → "Ursa Major"), ou null si aucune ne matche.
+function resolveConstellation(designations) {
+    for (const d of designations) {
+        const m = /^CON\s+\S+\s+(\S+)$/.exec(d);
+        if (m && CONSTELLATION_BY_IAU[m[1]]) return CONSTELLATION_BY_IAU[m[1]];
+    }
+    for (const d of designations) {
+        if (CONSTELLATION_BY_IAU[d]) return CONSTELLATION_BY_IAU[d];
+    }
+    return null;
+}
 
 function toFrench(name) {
     return FR_NAMES[name] || name;
@@ -241,7 +287,6 @@ async function initStellarium() {
         // ainsi l'avance temps réel à partir du point décalé.
         const nowMs = Date.now();
         const tonight = new Date(nowMs);
-        tonight.setUTCHours(22, 0, 0, 0);
         if (tonight.getTime() < nowMs) tonight.setUTCDate(tonight.getUTCDate() + 1);
         timeOffsetMs = tonight.getTime() - nowMs;
         stel.core.observer.utc = (nowMs + timeOffsetMs) / 86400000 + 40587;
@@ -316,8 +361,26 @@ async function initStellarium() {
                 const designations = sel.designations() || [];
                 selectedDesignations = designations;
                 const named = designations.find(d => d.startsWith('NAME '));
-                const rawName = named ? named.substring(5) : (designations[0] || 'Objet');
+                const namedValue = named ? named.substring(5) : null;
+                // Le moteur retourne "NAME And" pour la constellation Andromède
+                // (abbréviation IAU, pas le nom complet). On résout l'IAU vers
+                // le nom latin pour que toFrench() produise "Andromède" et que
+                // la recherche Wikipedia hit l'article correct.
+                const constellationLatin =
+                    (namedValue && CONSTELLATION_BY_IAU[namedValue])
+                    || resolveConstellation(designations);
+                const rawName = constellationLatin
+                    || namedValue
+                    || designations[0]
+                    || 'Objet';
                 const displayName = toFrench(rawName);
+                // On préfixe avec le nom latin pour que CelestialObjectDetail
+                // affiche "Ursa Major" en sous-titre plutôt que l'ID brut
+                // "CON western UMa" (subtitle = première designation hors NAME
+                // et != displayName).
+                const outDesignations = constellationLatin
+                    ? [constellationLatin, ...designations]
+                    : designations;
                 const info = {
                     vmag: sel.getInfo('vmag', obs),
                     distance: sel.getInfo('distance', obs),
@@ -325,12 +388,12 @@ async function initStellarium() {
                     radius: sel.getInfo('radius', obs),
                     radec: sel.getInfo('radec', obs),
                     altaz: sel.getInfo('altaz', obs),
-                    type: sel.getInfo('type', obs),
+                    type: constellationLatin ? 'Con' : sel.getInfo('type', obs),
                 };
                 sendToReactNative({
                     type: 'objectClicked',
                     name: displayName,
-                    designations,
+                    designations: outDesignations,
                     info,
                 });
             } catch (e) {

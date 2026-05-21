@@ -15,6 +15,11 @@ const root = __dirname;
 
 const UPSTREAM = 'https://stellarium.sfo2.cdn.digitaloceanspaces.com';
 const PROXY_PREFIX = '/data/';
+// Override local : si un fichier existe sous ./data-overrides/<path>,
+// on le sert au lieu de proxifier vers UPSTREAM. Utilisé pour franciser
+// les noms de constellations (skycultures/v3/western/index.json) que le
+// moteur rend directement sans passer par translateFn.
+const OVERRIDE_DIR = path.join(__dirname, 'data-overrides');
 
 const mime = {
     '.html': 'text/html; charset=utf-8',
@@ -40,6 +45,25 @@ const corsHeaders = {
 
 function proxy(req, res) {
     const upstreamPath = req.url.slice(PROXY_PREFIX.length - 1);
+
+    // Override : sert le fichier local si présent dans data-overrides/.
+    const overridePath = path.join(OVERRIDE_DIR, upstreamPath);
+    if (overridePath.startsWith(OVERRIDE_DIR)) {
+        try {
+            const stat = fs.statSync(overridePath);
+            if (stat.isFile()) {
+                const ext = path.extname(overridePath).toLowerCase();
+                res.writeHead(200, {
+                    ...corsHeaders,
+                    'Content-Type': mime[ext] || 'application/octet-stream',
+                    'Content-Length': stat.size,
+                });
+                fs.createReadStream(overridePath).pipe(res);
+                return;
+            }
+        } catch (_) { /* pas d'override, on proxy */ }
+    }
+
     const target = new URL(UPSTREAM + upstreamPath);
 
     const upstreamReq = https.request(
