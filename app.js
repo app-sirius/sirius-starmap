@@ -234,7 +234,10 @@ async function initStellarium() {
 
         await Promise.all([
             stel.setFont('regular', '/fonts/Inter-Regular.ttf'),
-            stel.setFont('bold',    '/fonts/Satoshi-Bold.otf'),
+            // TTF (glyf) et non OTF/CFF (OTTO) : le loader stb_truetype du
+            // moteur WASM trappe « Out of bounds memory access » dans
+            // core_add_font sur les fontes CFF. Converti depuis Satoshi-Bold.otf.
+            stel.setFont('bold',    '/fonts/Satoshi-Bold.ttf'),
         ]);
 
         const baseUrl = '/data/';
@@ -534,9 +537,20 @@ function guideTo(name) {
 
 const DSS_FOV_THRESHOLD_RAD = 2 * Math.PI / 180; // enable DSS tiles when zoomed past ~2°
 
+// En mode gyro (AR), on regarde le ciel comme à l'œil nu : dézoomer au-delà
+// de la vision humaine (~60°) n'a pas de sens physique et fige l'illusion 1:1
+// entre le mouvement du téléphone et le ciel. On plafonne donc le FOV à cette
+// valeur tant que le gyro est actif (le zoom AVANT reste libre).
+const EYE_VISION_FOV_RAD = 60 * Math.PI / 180;
+
 function updateOverlay() {
     if (stel) {
         stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        // Le pinch-zoom est géré nativement par le moteur : on rattrape ici
+        // tout dézoom qui dépasserait la vision humaine pendant le gyro.
+        if (gyroMode && stel.core.fov > EYE_VISION_FOV_RAD) {
+            stel.core.fov = EYE_VISION_FOV_RAD;
+        }
         const wantDss = stel.core.fov < DSS_FOV_THRESHOLD_RAD;
         if (stel.core.dss && stel.core.dss.visible !== wantDss) {
             stel.core.dss.visible = wantDss;
@@ -948,7 +962,12 @@ function handleMessage(data) {
 
             case 'gyroMode':
                 gyroMode = !!message.enabled;
-                if (!gyroMode) {
+                if (gyroMode) {
+                    // À l'activation, on cale le FOV sur la vision humaine :
+                    // c'est le zoom par défaut en AR et aussi le dézoom maximum
+                    // (le plafonnement continu est appliqué dans updateOverlay).
+                    stel.core.fov = EYE_VISION_FOV_RAD;
+                } else {
                     if (typeof stel.pointAndLock === 'function') {
                         try { stel.pointAndLock(null); } catch (e) {}
                     }
