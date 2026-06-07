@@ -232,6 +232,16 @@ async function initStellarium() {
             translateFn: (domain, str) => TRANSLATIONS[str] || str,
         });
 
+        // Le moteur appelle glClearColor(0,0,0,1) depuis le WASM à chaque frame ;
+        // impossible à éditer sans recompiler. Le glue route tous les appels GL via
+        // l'instance du contexte, donc on enveloppe clearColor pour forcer alpha=0
+        // quand arMode est actif → fond transparent (couplé à atmosphère/paysage off).
+        const _arGl = canvas.getContext('webgl');
+        if (_arGl) {
+            const _clearColor = _arGl.clearColor.bind(_arGl);
+            _arGl.clearColor = (r, g, b, a) => _clearColor(r, g, b, arMode ? 0 : a);
+        }
+
         await Promise.all([
             stel.setFont('regular', '/fonts/Inter-Regular.ttf'),
             // TTF (glyf) et non OTF/CFF (OTTO) : le loader stb_truetype du
@@ -500,6 +510,9 @@ function resolveObject(name) {
     return null;
 }
 
+// Mode AR (passthrough caméra) : quand actif, le fond du canvas est rendu
+// transparent pour laisser voir la caméra native dessous (cf. case 'arMode').
+let arMode = false;
 let trackedTarget = null;
 let gyroMode = false;
 // Décalage entre l'horloge réelle et le temps d'observation (ms). 0 = live.
@@ -973,6 +986,22 @@ function handleMessage(data) {
                     }
                 }
                 break;
+
+            case 'arMode': {
+                arMode = !!message.enabled;
+                if (arMode) {
+                    // On coupe ce qui peint le fond : la caméra native passe à travers.
+                    stel.core.atmosphere.visible = false;
+                    stel.core.landscapes.visible = false;
+                    document.body.style.background = 'transparent';
+                } else {
+                    // Restauration des valeurs d'init (cf. initStellarium).
+                    stel.core.atmosphere.visible = true;
+                    stel.core.landscapes.visible = true;
+                    document.body.style.background = '';
+                }
+                break;
+            }
         }
     } catch (error) {
         console.error('handleMessage failed', error);
