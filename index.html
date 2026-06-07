@@ -136,6 +136,12 @@
             pointer-events: none;
             z-index: -1;
         }
+        /* En mode AR, on étend ce dégradé à tout l'écran : ça agrandit les
+           bounds de la couche de compositing de la boussole, donc les
+           graduations qui bougent à chaque frame forcent WebKit à recomposer
+           tout l'écran → le canvas WebGL transparent est re-présenté partout
+           (corrige le bug de présentation partielle d'iOS WKWebView). */
+        body.ar-mode #compass::before { height: 100vh; }
         #compass-track {
             position: absolute;
             top: 12px; left: 0; right: 0;

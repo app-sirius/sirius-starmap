@@ -994,11 +994,15 @@ function handleMessage(data) {
                     stel.core.atmosphere.visible = false;
                     stel.core.landscapes.visible = false;
                     document.body.style.background = 'transparent';
+                    // Étend le dégradé de la boussole à tout l'écran : force iOS
+                    // à recomposer le canvas transparent partout (cf. CSS).
+                    document.body.classList.add('ar-mode');
                 } else {
                     // Restauration des valeurs d'init (cf. initStellarium).
                     stel.core.atmosphere.visible = true;
                     stel.core.landscapes.visible = true;
                     document.body.style.background = '';
+                    document.body.classList.remove('ar-mode');
                 }
                 break;
             }
