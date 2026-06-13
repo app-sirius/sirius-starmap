@@ -533,6 +533,8 @@ function resolveObject(name) {
 // Le moteur n'expose aucune option d'inertie : on la simule ici en prolongeant
 // la vélocité de observer.yaw/pitch après le relâcher du doigt.
 const INERTIA_FRICTION = 0.94;       // décroissance par frame @60fps (~1 s d'élan), réglable
+const FRAME_MS_60 = 1000 / 60;       // période d'une frame à 60 fps (ms)
+const MAX_FRAME_MS = 64;             // plafond de dt : absorbe les pauses rAF (≈ <15 fps)
 const INERTIA_MIN_VELOCITY = 1e-4;   // rad/ms : seuil d'armement ET d'arrêt (~0.1 rad/s)
 const VELOCITY_SAMPLE_MS = 100;      // fenêtre de lissage exponentiel de la vitesse
 const PITCH_LIMIT_RAD = Math.PI / 2 - 1e-3; // butée haute/basse (zénith / horizon)
@@ -610,9 +612,12 @@ function stepInertia(now) {
         inertiaLastPitch = obs.pitch;
         return;
     }
-    const dt = now - inertiaLastFrameT;
+    let dt = now - inertiaLastFrameT;
     inertiaLastFrameT = now;
     if (dt <= 0) return;
+    // Si l'app a été backgroundée, rAF s'est figé : un dt énorme téléporterait
+    // la vue (obs.yaw += v*dt). On plafonne pour absorber ces sauts.
+    if (dt > MAX_FRAME_MS) dt = MAX_FRAME_MS;
 
     if (inertiaDragging) {
         // Vitesse instantanée à partir du mouvement réel du moteur, lissée
@@ -630,7 +635,7 @@ function stepInertia(now) {
         if (nextPitch < -PITCH_LIMIT_RAD) { nextPitch = -PITCH_LIMIT_RAD; inertiaVPitch = 0; }
         obs.pitch = nextPitch;
 
-        const decay = Math.pow(INERTIA_FRICTION, dt / 16.667);
+        const decay = Math.pow(INERTIA_FRICTION, dt / FRAME_MS_60);
         inertiaVYaw *= decay;
         inertiaVPitch *= decay;
         if (Math.hypot(inertiaVYaw, inertiaVPitch) < INERTIA_MIN_VELOCITY) {
@@ -1062,8 +1067,10 @@ function handleMessage(data) {
 
             case 'gyroMode':
                 gyroMode = !!message.enabled;
-                if (gyroMode) { inertiaActive = false; inertiaDragging = false; }
                 if (gyroMode) {
+                    // Reprise du gyro : on coupe tout élan d'inertie en cours.
+                    inertiaActive = false;
+                    inertiaDragging = false;
                     // À l'activation, on cale le FOV sur la vision humaine :
                     // c'est le zoom par défaut en AR et aussi le dézoom maximum
                     // (le plafonnement continu est appliqué dans updateOverlay).
