@@ -634,6 +634,10 @@ function stepInertia(now) {
         if (nextPitch > PITCH_LIMIT_RAD) { nextPitch = PITCH_LIMIT_RAD; inertiaVPitch = 0; }
         if (nextPitch < -PITCH_LIMIT_RAD) { nextPitch = -PITCH_LIMIT_RAD; inertiaVPitch = 0; }
         obs.pitch = nextPitch;
+        // Comme pour le gyro (cf. case 'observerOrientation') : sans update(), le
+        // moteur rend depuis un cache de matrices périmé → désync canvas/overlay
+        // et saccades. On commit l'orientation à chaque frame d'inertie.
+        if (typeof obs.update === 'function') obs.update();
 
         const decay = Math.pow(INERTIA_FRICTION, dt / FRAME_MS_60);
         inertiaVYaw *= decay;
