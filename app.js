@@ -424,10 +424,20 @@ async function initStellarium() {
         let touchStartY = 0;
         let panNotified = false;
         canvas.addEventListener('touchstart', (e) => {
-            if (e.touches.length !== 1) return;
+            // Tout nouveau contact « rattrape » le ciel : on coupe l'élan en cours.
+            inertiaActive = false;
+            if (e.touches.length !== 1) { inertiaDragging = false; return; }
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
             panNotified = false;
+            // Démarre la mesure de vélocité pour ce glissé.
+            inertiaDragging = true;
+            inertiaVYaw = 0;
+            inertiaVPitch = 0;
+            if (stel) {
+                inertiaLastYaw = stel.core.observer.yaw;
+                inertiaLastPitch = stel.core.observer.pitch;
+            }
         }, { passive: true });
         canvas.addEventListener('touchmove', (e) => {
             if (!gyroMode || panNotified || e.touches.length !== 1) return;
@@ -436,6 +446,15 @@ async function initStellarium() {
             if (Math.hypot(dx, dy) > PAN_THRESHOLD_PX) {
                 panNotified = true;
                 sendToReactNative({ type: 'userPan' });
+            }
+        }, { passive: true });
+        canvas.addEventListener('touchend', (e) => {
+            if (!inertiaDragging) return;
+            // On n'arme qu'au dernier doigt levé.
+            if (e.touches.length > 0) return;
+            inertiaDragging = false;
+            if (Math.hypot(inertiaVYaw, inertiaVPitch) >= INERTIA_MIN_VELOCITY) {
+                inertiaActive = true;
             }
         }, { passive: true });
 
@@ -510,6 +529,22 @@ function resolveObject(name) {
     return null;
 }
 
+// --- Inertie du pan manuel (cf. docs/superpowers/specs/2026-06-13-skymap-inertia-design.md)
+// Le moteur n'expose aucune option d'inertie : on la simule ici en prolongeant
+// la vélocité de observer.yaw/pitch après le relâcher du doigt.
+const INERTIA_FRICTION = 0.94;       // décroissance par frame @60fps (~1 s d'élan), réglable
+const INERTIA_MIN_VELOCITY = 1e-4;   // rad/ms : seuil d'armement ET d'arrêt (~0.1 rad/s)
+const VELOCITY_SAMPLE_MS = 100;      // fenêtre de lissage exponentiel de la vitesse
+const PITCH_LIMIT_RAD = Math.PI / 2 - 1e-3; // butée haute/basse (zénith / horizon)
+
+let inertiaDragging = false;   // vrai pendant un glissé 1 doigt
+let inertiaActive = false;     // vrai pendant la phase d'élan post-relâcher
+let inertiaVYaw = 0;           // vitesse lissée en rad/ms
+let inertiaVPitch = 0;
+let inertiaLastYaw = 0;        // dernière position échantillonnée
+let inertiaLastPitch = 0;
+let inertiaLastFrameT = 0;     // performance.now() de la frame précédente
+
 // Mode AR (passthrough caméra) : quand actif, le fond du canvas est rendu
 // transparent pour laisser voir la caméra native dessous (cf. case 'arMode').
 let arMode = false;
@@ -556,9 +591,61 @@ const DSS_FOV_THRESHOLD_RAD = 2 * Math.PI / 180; // enable DSS tiles when zoomed
 // permanence (le zoom AVANT reste libre).
 const EYE_VISION_FOV_RAD = 60 * Math.PI / 180;
 
+// Plus court écart angulaire a-b dans (-π, π], pour gérer le passage 0/2π
+// de l'azimut (yaw) sans générer une vitesse aberrante au franchissement.
+function angDiff(a, b) {
+    let d = (a - b) % (2 * Math.PI);
+    if (d > Math.PI) d -= 2 * Math.PI;
+    if (d < -Math.PI) d += 2 * Math.PI;
+    return d;
+}
+
+// Échantillonne la vélocité pendant un glissé, et prolonge le mouvement
+// avec friction après le relâcher. Appelée à chaque frame depuis updateOverlay.
+function stepInertia(now) {
+    const obs = stel.core.observer;
+    if (!inertiaLastFrameT) {
+        inertiaLastFrameT = now;
+        inertiaLastYaw = obs.yaw;
+        inertiaLastPitch = obs.pitch;
+        return;
+    }
+    const dt = now - inertiaLastFrameT;
+    inertiaLastFrameT = now;
+    if (dt <= 0) return;
+
+    if (inertiaDragging) {
+        // Vitesse instantanée à partir du mouvement réel du moteur, lissée
+        // exponentiellement sur ~VELOCITY_SAMPLE_MS.
+        const instYaw = angDiff(obs.yaw, inertiaLastYaw) / dt;
+        const instPitch = (obs.pitch - inertiaLastPitch) / dt;
+        const alpha = Math.min(1, dt / VELOCITY_SAMPLE_MS);
+        inertiaVYaw = inertiaVYaw * (1 - alpha) + instYaw * alpha;
+        inertiaVPitch = inertiaVPitch * (1 - alpha) + instPitch * alpha;
+    } else if (inertiaActive) {
+        // Intégration + friction normalisée sur la durée de frame (indépendant du fps).
+        obs.yaw += inertiaVYaw * dt;
+        let nextPitch = obs.pitch + inertiaVPitch * dt;
+        if (nextPitch > PITCH_LIMIT_RAD) { nextPitch = PITCH_LIMIT_RAD; inertiaVPitch = 0; }
+        if (nextPitch < -PITCH_LIMIT_RAD) { nextPitch = -PITCH_LIMIT_RAD; inertiaVPitch = 0; }
+        obs.pitch = nextPitch;
+
+        const decay = Math.pow(INERTIA_FRICTION, dt / 16.667);
+        inertiaVYaw *= decay;
+        inertiaVPitch *= decay;
+        if (Math.hypot(inertiaVYaw, inertiaVPitch) < INERTIA_MIN_VELOCITY) {
+            inertiaActive = false;
+        }
+    }
+
+    inertiaLastYaw = obs.yaw;
+    inertiaLastPitch = obs.pitch;
+}
+
 function updateOverlay() {
     if (stel) {
         stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        stepInertia(performance.now());
         // Le pinch-zoom est géré nativement par le moteur : on rattrape ici
         // tout dézoom qui dépasserait la vision humaine.
         if (stel.core.fov > EYE_VISION_FOV_RAD) {
@@ -975,6 +1062,7 @@ function handleMessage(data) {
 
             case 'gyroMode':
                 gyroMode = !!message.enabled;
+                if (gyroMode) { inertiaActive = false; inertiaDragging = false; }
                 if (gyroMode) {
                     // À l'activation, on cale le FOV sur la vision humaine :
                     // c'est le zoom par défaut en AR et aussi le dézoom maximum
