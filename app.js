@@ -45,6 +45,13 @@ const CAM_STILL_EPS = 0.001;
 // son propre label de sélection (sinon superposition visuelle).
 let selectedDesignations = null;
 
+// Vrai le temps d'UNE notification 'selection' quand c'est guideTo()/pointAt()
+// qui pose la sélection (et non un tap utilisateur). Le listener consomme le
+// flag pour NE PAS remonter d'objectClicked : sinon « Pointer dans le ciel »
+// rouvrirait une fiche de détail tout seul. Le marqueur de sélection, lui,
+// reste affiché.
+let suppressSelectionEvent = false;
+
 if (window.ReactNativeWebView) {
     isReactNative = true;
 }
@@ -367,6 +374,18 @@ async function initStellarium() {
                 // on arrête de guider/suivre la cible précédente.
                 trackedTarget = null;
                 selectedDesignations = null;
+                // Sécurité : on ne laisse pas le flag coincé sur une désélection.
+                suppressSelectionEvent = false;
+                return;
+            }
+            // Sélection posée par guideTo()/pointAt() (programmatique, pas un tap) :
+            // on garde le marqueur/label mais on NE remonte PAS objectClicked,
+            // sinon la fiche de détail s'ouvrirait toute seule lors d'un « Pointer ».
+            if (suppressSelectionEvent) {
+                suppressSelectionEvent = false;
+                try {
+                    selectedDesignations = sel.designations() || [];
+                } catch (e) {}
                 return;
             }
             try {
@@ -564,6 +583,8 @@ function pointAt(name, fovDeg = 30) {
         sendToReactNative({ type: 'lookAtError', target: name });
         return;
     }
+    // Sélection programmatique : le listener ne doit pas la traiter comme un tap.
+    suppressSelectionEvent = true;
     stel.core.selection = obj;
     stel.pointAndLock(obj, 1.0);
     stel.zoomTo(fovDeg * Math.PI / 180, 1.0);
@@ -580,6 +601,8 @@ function guideTo(name) {
     }
     // Sélectionne l'astre (marqueur + info engine) sans bloquer la caméra :
     // pas de pointAndLock ni zoomTo, on garde le contrôle gyro.
+    // Sélection programmatique : le listener ne doit pas la traiter comme un tap.
+    suppressSelectionEvent = true;
     stel.core.selection = obj;
     trackedTarget = { name, obj };
     sendToReactNative({ type: 'lookAtSuccess', target: name });
@@ -1082,6 +1105,18 @@ function handleMessage(data) {
                 } else {
                     if (typeof stel.pointAndLock === 'function') {
                         try { stel.pointAndLock(null); } catch (e) {}
+                    }
+                    // Sortie du gyro : le téléphone était sans doute incliné, ce
+                    // qui a laissé un roll non nul sur l'observateur → horizon
+                    // penché. En mode manuel on veut un horizon de niveau, donc
+                    // on réinitialise la rotation autour de l'axe de visée
+                    // (yaw/pitch conservés : on continue de regarder au même
+                    // endroit). update() pour resynchroniser canvas + overlay.
+                    if ('roll' in stel.core.observer) {
+                        stel.core.observer.roll = 0;
+                        if (typeof stel.core.observer.update === 'function') {
+                            stel.core.observer.update();
+                        }
                     }
                 }
                 break;
