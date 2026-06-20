@@ -28,6 +28,7 @@ let starLabels = [];
 // le résultat et on rafraîchit toutes les SUN_CHECK_INTERVAL_MS.
 let sunObj = null;
 let isDaytime = false;
+let daytimeSent = false; // pour émettre l'état jour/nuit au 1er calcul puis à chaque bascule
 let lastSunCheckMs = 0;
 const SUN_CHECK_INTERVAL_MS = 2000;
 // updateStarLabels short-circuit "caméra immobile" : on saute toute la
@@ -746,6 +747,12 @@ function updateStarLabels() {
                 const pSunObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', pSun);
                 const [, sunAlt] = stel.c2s(pSunObs);
                 isDaytime = sunAlt > -6 * Math.PI / 180;
+                // Émet l'état jour/nuit à l'app (1re fois + à chaque bascule) pour
+                // qu'elle adapte l'UI (ex. fond de la bottom sheet).
+                if (isDaytime !== wasDay || !daytimeSent) {
+                    daytimeSent = true;
+                    sendToReactNative({ type: 'daytime', isDay: isDaytime });
+                }
             }
         }
     }
