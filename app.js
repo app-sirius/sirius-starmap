@@ -434,6 +434,27 @@ async function initStellarium() {
             }
         });
 
+        // Croix de désélection dans la pastille du curseur (#arrow-label) :
+        // lève la sélection moteur + le verrou caméra et masque
+        // immédiatement curseur + pastille. Seul ce bouton est cliquable
+        // (pointer-events:auto), donc le tap ne retombe pas sur le canvas.
+        const deselectBtn = document.getElementById('arrow-label-close');
+        if (deselectBtn) {
+            deselectBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                stel.core.selection = null;
+                try { stel.pointAndLock(null); } catch (err) {}
+                // Le listener change('selection') remet trackedTarget/
+                // selectedDesignations à null ; on masque tout de suite.
+                trackedTarget = null;
+                const arrowEl = document.getElementById('arrow');
+                const labelEl = document.getElementById('arrow-label');
+                if (arrowEl) arrowEl.classList.remove('visible');
+                if (labelEl) labelEl.classList.remove('visible');
+            });
+        }
+
         // Détection d'un pan utilisateur en mode gyro : un slide à un doigt
         // (> seuil) signale que l'utilisateur reprend la main, on demande
         // au natif de couper le gyro. Filtré sur gyroMode pour ne pas
@@ -995,7 +1016,9 @@ function updateArrow() {
         arrowEl.style.top = '50%';
         arrowEl.style.transform = `translate(-50%, -50%) rotate(${screenAngle}rad)`;
         arrowEl.classList.add('visible');
-        labelEl.textContent = trackedTarget.name;
+        // Écrit le nom dans le span interne pour ne pas écraser le bouton croix.
+        const labelTextEl = document.getElementById('arrow-label-text');
+        if (labelTextEl) labelTextEl.textContent = trackedTarget.name;
         labelEl.classList.add('visible');
     }
 }

@@ -112,8 +112,30 @@
             text-transform: uppercase;
             white-space: nowrap;
             color: #ffffff;
+            align-items: center;
+            gap: 4px;
         }
-        #arrow-label.visible { display: block; }
+        #arrow-label.visible { display: flex; }
+        /* Croix de désélection : seul élément cliquable de la pastille
+           (le parent reste pointer-events:none). Marges négatives pour
+           agrandir la zone de tap dans le padding de la pastille. */
+        #arrow-label-close {
+            pointer-events: auto;
+            appearance: none;
+            -webkit-appearance: none;
+            margin: -6px -8px -6px -2px;
+            padding: 6px 8px;
+            background: transparent;
+            border: none;
+            border-radius: 999px;
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 12px;
+            line-height: 1;
+            color: rgba(255, 255, 255, 0.85);
+            cursor: pointer;
+        }
+        #arrow-label-close:active { color: var(--sirius-red); }
 
         #compass {
             position: absolute;
@@ -268,7 +290,7 @@
         </div>
     </div>
     <div id="arrow">➤</div>
-    <div id="arrow-label"></div>
+    <div id="arrow-label"><span id="arrow-label-text"></span><button id="arrow-label-close" aria-label="Désélectionner">✕</button></div>
     <div id="compass">
         <div id="compass-marker"></div>
         <div id="compass-track"></div>
