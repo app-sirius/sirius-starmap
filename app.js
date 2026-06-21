@@ -226,6 +226,14 @@ function toFrench(name) {
     return FR_NAMES[name] || name;
 }
 
+// Nom d'affichage propre pour la pastille du curseur : RN passe la
+// désignation brute du moteur (ex. « NAME Sun »). On retire le préfixe
+// « NAME » puis on traduit (« Sun » → « Soleil »).
+function prettyName(name) {
+    if (!name) return name;
+    return toFrench(name.replace(/^NAME\s+/i, ''));
+}
+
 async function initStellarium() {
     try {
         canvas = document.getElementById('canvas');
@@ -1018,7 +1026,7 @@ function updateArrow() {
         arrowEl.classList.add('visible');
         // Écrit le nom dans le span interne pour ne pas écraser le bouton croix.
         const labelTextEl = document.getElementById('arrow-label-text');
-        if (labelTextEl) labelTextEl.textContent = trackedTarget.name;
+        if (labelTextEl) labelTextEl.textContent = prettyName(trackedTarget.name);
         labelEl.classList.add('visible');
     }
 }
