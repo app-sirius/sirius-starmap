@@ -599,6 +599,11 @@ let inertiaLastFrameT = 0;     // performance.now() de la frame précédente
 // Mode AR (passthrough caméra) : quand actif, le fond du canvas est rendu
 // transparent pour laisser voir la caméra native dessous (cf. case 'arMode').
 let arMode = false;
+// FOV (radians) calé sur l'optique réelle de la caméra, fourni par RN avec le
+// message 'arMode' (cf. computeArFovRad). Sans ça, le moteur rend 60° là où la
+// caméra n'en montre qu'~40 → les étoiles défilent moins vite que le décor
+// (parallaxe). null hors AR.
+let arFovRad = null;
 let trackedTarget = null;
 let gyroMode = false;
 // Décalage entre l'horloge réelle et le temps d'observation (ms). 0 = live.
@@ -1137,9 +1142,12 @@ function handleMessage(data) {
                     inertiaActive = false;
                     inertiaDragging = false;
                     // À l'activation, on cale le FOV sur la vision humaine :
-                    // c'est le zoom par défaut en AR et aussi le dézoom maximum
-                    // (le plafonnement continu est appliqué dans updateOverlay).
-                    stel.core.fov = EYE_VISION_FOV_RAD;
+                    // c'est le dézoom maximum (le plafonnement continu est
+                    // appliqué dans updateOverlay). En AR cependant, le FOV doit
+                    // matcher l'optique caméra : on conserve la valeur calée
+                    // (sinon une réactivation gyro pendant l'AR — retour focus,
+                    // levée — ferait resurgir la parallaxe).
+                    stel.core.fov = arMode && arFovRad ? arFovRad : EYE_VISION_FOV_RAD;
                 } else {
                     if (typeof stel.pointAndLock === 'function') {
                         try { stel.pointAndLock(null); } catch (e) {}
@@ -1169,12 +1177,24 @@ function handleMessage(data) {
                     // Étend le dégradé de la boussole à tout l'écran : force iOS
                     // à recomposer le canvas transparent partout (cf. CSS).
                     document.body.classList.add('ar-mode');
+                    // Cale le zoom sur l'optique réelle de la caméra pour que le
+                    // ciel se superpose 1:1 au décor (anti-parallaxe). Peut
+                    // arriver après le gyroMode:true (qui a mis 60°) → on écrase.
+                    // Absent/invalide (format pas encore résolu) : on garde 60°,
+                    // RN re-poussera la valeur via l'effet [arFovRad].
+                    if (typeof message.fovRad === 'number' && message.fovRad > 0) {
+                        arFovRad = message.fovRad;
+                        stel.core.fov = arFovRad;
+                    }
                 } else {
                     // Restauration des valeurs d'init (cf. initStellarium).
+                    arFovRad = null;
                     stel.core.atmosphere.visible = true;
                     stel.core.landscapes.visible = true;
                     document.body.style.background = '';
                     document.body.classList.remove('ar-mode');
+                    // Revient au zoom vision humaine (le gyro reste actif).
+                    stel.core.fov = EYE_VISION_FOV_RAD;
                 }
                 break;
             }
