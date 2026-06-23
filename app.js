@@ -472,6 +472,9 @@ async function initStellarium() {
         let touchStartX = 0;
         let touchStartY = 0;
         let panNotified = false;
+        // Pointeurs tactiles encore "enfoncés" côté moteur (identifier -> coords
+        // moteur), pour pouvoir les solder sur touchcancel / background.
+        const activeTouches = new Map();
         canvas.addEventListener('touchstart', (e) => {
             // Tout nouveau contact « rattrape » le ciel : on coupe l'élan en cours.
             inertiaActive = false;
@@ -498,6 +501,9 @@ async function initStellarium() {
             }
         }, { passive: true });
         canvas.addEventListener('touchend', (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                activeTouches.delete(e.changedTouches[i].identifier);
+            }
             if (!inertiaDragging) return;
             // On n'arme qu'au dernier doigt levé.
             if (e.touches.length > 0) return;
@@ -506,6 +512,54 @@ async function initStellarium() {
                 inertiaActive = true;
             }
         }, { passive: true });
+
+        // --- Solde des pointeurs interrompus (fix : drag mort après background) ---
+        // iOS émet `touchcancel` (et NON `touchend`) quand un toucher est
+        // interrompu — typiquement au passage en arrière-plan doigt encore posé.
+        // Ni app.js ni le moteur n'écoutaient `touchcancel`, donc le moteur
+        // gardait le pointeur `id` "enfoncé" pour toujours : son `touchstart`
+        // appelle `_core_on_mouse(id, 1)` (down) jamais soldé par `(id, 0)` (up).
+        // Au retour de premier plan, le doigt suivant reçoit un nouvel `id` → le
+        // moteur voit 2 pointeurs → il croit à un pinch → le pan d'un doigt ne
+        // tourne plus le ciel (le gyro, qui écrit observer.yaw en direct, est
+        // épargné). On solde donc explicitement les pointeurs restés actifs.
+        const trackTouch = (t) => {
+            const rect = canvas.getBoundingClientRect();
+            activeTouches.set(t.identifier, { x: t.pageX - rect.left, y: t.pageY - rect.top });
+        };
+        const releasePointer = (id, x, y) => {
+            // Rejoue exactement l'`up` que le moteur attend (cf. son handler
+            // touchend interne : `_core_on_mouse(id, 0, relX, relY, 1)`).
+            if (stel && typeof stel._core_on_mouse === 'function') {
+                stel._core_on_mouse(id, 0, x, y, 1);
+            }
+        };
+        const releaseAllPointers = () => {
+            activeTouches.forEach((pos, id) => releasePointer(id, pos.x, pos.y));
+            activeTouches.clear();
+            inertiaDragging = false;
+        };
+        canvas.addEventListener('touchstart', (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) trackTouch(e.changedTouches[i]);
+        }, { passive: true });
+        canvas.addEventListener('touchmove', (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) trackTouch(e.changedTouches[i]);
+        }, { passive: true });
+        canvas.addEventListener('touchcancel', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                releasePointer(t.identifier, t.pageX - rect.left, t.pageY - rect.top);
+                activeTouches.delete(t.identifier);
+            }
+            inertiaDragging = false;
+        }, { passive: true });
+        // Filet de sécurité : si iOS suspend sans émettre touchcancel, on solde
+        // tout pointeur encore actif au passage en arrière-plan ET au retour
+        // (un toucher ne survit jamais à un background, donc tout `id` encore
+        // listé au réveil est forcément périmé).
+        document.addEventListener('visibilitychange', releaseAllPointers);
+        window.addEventListener('pagehide', releaseAllPointers);
 
         buildStarLabels();
 
