@@ -707,6 +707,15 @@ const AR_DPR_CAP = 2;
 let arFovRad = null;
 let trackedTarget = null;
 let gyroMode = false;
+// Dernière orientation gyro reçue du natif, en attente d'application. On ne
+// l'écrit PAS sur l'observer à la réception (cf. case 'observerOrientation') :
+// updateOverlay l'applique une fois par frame, calé sur le rendu. Why: appliquer
+// + observer.update() à chaque message (jusqu'à 60/s) sature le thread JS quand
+// l'AR partage déjà ce thread avec la composition caméra → les updates arrivent
+// en rafales et le ciel saute par paliers, alors que le pan au doigt (traité
+// dans la boucle moteur) reste fluide. Appliquer une fois/frame aligne le gyro
+// sur le rendu, comme le doigt.
+let pendingObserverOrientation = null;
 // Décalage entre l'horloge réelle et le temps d'observation (ms). 0 = live.
 // `setTime` met à jour cet offset pour figer un instant tout en continuant
 // à avancer en temps réel depuis ce point.
@@ -813,6 +822,24 @@ function stepInertia(now) {
 function updateOverlay() {
     if (stel) {
         stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        // Applique l'orientation gyro en attente, une seule fois par frame et
+        // synchronisée au rendu (cf. pendingObserverOrientation + case
+        // 'observerOrientation'). On vide après application : au repos (aucun
+        // nouveau message, RN gate via EPS) on n'appelle pas update() pour rien.
+        // Avant updateStarLabels pour que canvas et labels lisent la même
+        // orientation sur cette frame (pas de désync de roll).
+        if (pendingObserverOrientation) {
+            const o = pendingObserverOrientation;
+            pendingObserverOrientation = null;
+            if (typeof o.yaw === 'number') stel.core.observer.yaw = o.yaw;
+            if (typeof o.pitch === 'number') stel.core.observer.pitch = o.pitch;
+            if (typeof o.roll === 'number' && 'roll' in stel.core.observer) {
+                stel.core.observer.roll = o.roll;
+            }
+            if (typeof stel.core.observer.update === 'function') {
+                stel.core.observer.update();
+            }
+        }
         stepInertia(performance.now());
         // Le pinch-zoom est géré nativement par le moteur : on rattrape ici
         // tout dézoom qui dépasserait la vision humaine.
@@ -1151,18 +1178,11 @@ function handleMessage(data) {
 
         switch (message.type) {
             case 'observerOrientation':
-                if (typeof message.yaw === 'number') stel.core.observer.yaw = message.yaw;
-                if (typeof message.pitch === 'number') stel.core.observer.pitch = message.pitch;
-                if (typeof message.roll === 'number' && 'roll' in stel.core.observer) {
-                    stel.core.observer.roll = message.roll;
-                }
-                // Sans update(), le moteur rend avec un cache interne de matrices
-                // qui peut désynchroniser le canvas (rendu avec roll N) et notre
-                // overlay (qui lit obs.roll = N+1 au prochain frame). Résultat :
-                // labels HTML décalés des étoiles canvas pendant les rotations.
-                if (typeof stel.core.observer.update === 'function') {
-                    stel.core.observer.update();
-                }
+                // On NE touche PAS à l'observer ici : on mémorise la dernière
+                // orientation, appliquée une fois par frame dans updateOverlay
+                // (cf. pendingObserverOrientation). Les messages plus récents
+                // écrasent les anciens → on n'applique jamais une valeur périmée.
+                pendingObserverOrientation = message;
                 break;
                 
             case 'location':
