@@ -653,6 +653,37 @@ let inertiaLastFrameT = 0;     // performance.now() de la frame précédente
 // Mode AR (passthrough caméra) : quand actif, le fond du canvas est rendu
 // transparent pour laisser voir la caméra native dessous (cf. case 'arMode').
 let arMode = false;
+
+// Plafond de densité de rendu EN MODE AR uniquement.
+// Why: la boucle du moteur (cf. stellarium-web-engine.js) dimensionne son canvas
+// à `largeurCSS × window.devicePixelRatio` et rend ce nombre de pixels à chaque
+// frame (WebGL + antialias). Sur un grand écran dense (dpr=3, ex. iPhone 16 Pro
+// Max), ça fait ~3,8 M px/frame ; le rendu WASM/WebGL n'a pas l'accélération de la
+// caméra native (composée par l'OS), donc le framerate du ciel chute → étoiles
+// qui avancent par paliers en mouvement, alors que le fond caméra reste fluide.
+// Plafonner dpr à 2 en AR (3→2 = ~56 % de pixels en moins) restaure la fluidité.
+// Imperceptible : les étoiles sont des points sur un fond caméra nocturne, et les
+// labels HTML sont positionnés en pixels CSS (indépendants du dpr interne). Hors
+// AR, on garde la pleine résolution → la carte normale est inchangée.
+// How: le moteur relit `window.devicePixelRatio` à chaque frame ; on redéfinit le
+// getter pour qu'il rende la valeur plafonnée quand `arMode` est actif. Le moteur
+// recalcule la taille du canvas dès la frame suivante (sizeChanged déjà vrai à
+// chaque frame), donc la bascule AR prend effet immédiatement, sans resize manuel.
+const AR_DPR_CAP = 2;
+(function capDevicePixelRatioInAr() {
+    const realDpr = window.devicePixelRatio || 1;
+    // Rien à gagner si l'appareil est déjà sous le plafond (dpr ≤ 2).
+    if (realDpr <= AR_DPR_CAP) return;
+    try {
+        Object.defineProperty(window, 'devicePixelRatio', {
+            configurable: true,
+            get: () => (arMode ? AR_DPR_CAP : realDpr),
+        });
+    } catch (e) {
+        // Certaines WebView refusent de redéfinir le global → repli silencieux
+        // sur le comportement actuel (pleine résolution partout).
+    }
+})();
 // FOV (radians) calé sur l'optique réelle de la caméra, fourni par RN avec le
 // message 'arMode' (cf. computeArFovRad). Sans ça, le moteur rend 60° là où la
 // caméra n'en montre qu'~40 → les étoiles défilent moins vite que le décor
