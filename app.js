@@ -598,10 +598,26 @@ document.addEventListener('message', function(event) {
 // limite (NELM typique) et le mag_offset des DSO, sinon les étoiles
 // faibles + tous les Messier restent affichés malgré la pollution.
 //   Bortle 1 ≈ NELM 7.6 • 5 ≈ 6.0 • 9 ≈ 4.0  (formule linéaire 8 − 0.5·b)
+// Dernière classe de Bortle appliquée (init / setBortle). Mémorisée pour
+// recalculer display_limit_mag à la bascule AR sans que le natif renvoie un
+// setBortle.
+let currentBortle = 1;
+// Magnitude limite des étoiles EN AR : on ne garde que les astres brillants
+// (visibles à l'œil nu sur un vrai ciel filmé). Coupe le rendu de milliers
+// d'étoiles faibles, invisibles de toute façon derrière la caméra → allège le
+// rendu point-source. Hors AR, aucun plafond (display_limit_mag reste piloté
+// uniquement par la pollution lumineuse).
+const AR_STAR_LIMIT_MAG = 5.5;
+
 function applyBortle(bortle) {
     const b = Math.max(1, Math.min(9, bortle));
+    currentBortle = b;
     stel.core.atmosphere.bortle_index = b;
-    stel.core.display_limit_mag = 8 - 0.5 * b;
+    // En AR, on plafonne la magnitude limite aux étoiles brillantes
+    // (min → ne fait que retirer des étoiles, jamais en ajouter).
+    let limitMag = 8 - 0.5 * b;
+    if (arMode) limitMag = Math.min(limitMag, AR_STAR_LIMIT_MAG);
+    stel.core.display_limit_mag = limitMag;
     const dsoOffset = Math.max(-1, 1.5 - 0.3 * b);
     stel.core.dsos.hints_mag_offset = dsoOffset;
     stel.core.center_hints_mag_offset = dsoOffset;
@@ -1258,6 +1274,14 @@ function handleMessage(data) {
                     // On coupe ce qui peint le fond : la caméra native passe à travers.
                     stel.core.atmosphere.visible = false;
                     stel.core.landscapes.visible = false;
+                    // Allègement du rendu en AR (le budget GPU est partagé avec la
+                    // caméra + la composition transparente) : Voie lactée (survey
+                    // image = poste le plus lourd) et DSO coupés, étoiles plafonnées
+                    // aux brillantes via applyBortle (qui relit arMode). Restauré à la
+                    // sortie. Cf. mémoire perf AR / commit plafond dpr.
+                    stel.core.milkyway.visible = false;
+                    stel.core.dsos.visible = false;
+                    applyBortle(currentBortle);
                     document.body.style.background = 'transparent';
                     // Étend le dégradé de la boussole à tout l'écran : force iOS
                     // à recomposer le canvas transparent partout (cf. CSS).
@@ -1276,6 +1300,11 @@ function handleMessage(data) {
                     arFovRad = null;
                     stel.core.atmosphere.visible = true;
                     stel.core.landscapes.visible = true;
+                    // Restaure le rendu complet coupé à l'entrée AR (arMode est déjà
+                    // false ici → applyBortle lève le plafond de magnitude).
+                    stel.core.milkyway.visible = true;
+                    stel.core.dsos.visible = true;
+                    applyBortle(currentBortle);
                     document.body.style.background = '';
                     document.body.classList.remove('ar-mode');
                     // Revient au zoom vision humaine (le gyro reste actif).
