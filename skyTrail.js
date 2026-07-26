@@ -159,6 +159,93 @@
         return kept;
     }
 
+    const MJD_EPOCH = 40587;   // jour julien modifié de 1970-01-01
+
+    // Interroge le moteur sur la position de `obj` à chaque instant de la
+    // fenêtre, via un observateur CLONÉ : le temps affiché n'est jamais touché.
+    //
+    // `engine` est injecté (plutôt que lu sur globalThis) pour que la fonction
+    // soit testable avec un faux moteur.
+    function sampleTrail(obj, observer, nowMs, engine, opts) {
+        const times = buildSampleTimes(nowMs, opts);
+        const clone = observer.clone();
+
+        try {
+            function azAltAt(tMs) {
+                clone.utc = tMs / 86400000 + MJD_EPOCH;
+                clone.update();
+                const pIcrf = obj.getInfo('radec', clone);
+                if (!pIcrf) return null;
+                const azAlt = engine.c2s(engine.convertFrame(clone, 'ICRF', 'OBSERVED', pIcrf));
+                return { az: azAlt[0], alt: azAlt[1] };
+            }
+
+            const raw = [];
+            for (let i = 0; i < times.length; i++) {
+                const p = azAltAt(times[i].tMs);
+                raw.push({
+                    tMs: times[i].tMs,
+                    isHour: times[i].isHour,
+                    az: p ? p.az : NaN,
+                    alt: p ? p.alt : NaN,
+                    ok: !!p,
+                });
+            }
+
+            // Premier échantillon exploitable au-dessus de l'horizon.
+            let riseIdx = -1;
+            for (let i = 0; i < raw.length; i++) {
+                if (raw[i].ok && raw[i].alt > 0) { riseIdx = i; break; }
+            }
+            if (riseIdx === -1) return { samples: [], riseMs: null, setMs: null };
+
+            // Premier retour sous l'horizon après ça.
+            let setIdx = -1;
+            for (let i = riseIdx + 1; i < raw.length; i++) {
+                if (raw[i].ok && raw[i].alt <= 0) { setIdx = i; break; }
+            }
+
+            function altAt(tMs) {
+                const p = azAltAt(tMs);
+                return p ? p.alt : -1;
+            }
+
+            // Lever : seulement si l'astre était déjà sous l'horizon au départ.
+            // Sinon la course commence à « maintenant », pas à un lever.
+            let riseMs = null;
+            if (riseIdx > 0) {
+                riseMs = findHorizonCrossing(raw[riseIdx - 1].tMs, raw[riseIdx].tMs, altAt);
+            }
+            let setMs = null;
+            if (setIdx !== -1) {
+                setMs = findHorizonCrossing(raw[setIdx - 1].tMs, raw[setIdx].tMs, altAt);
+            }
+
+            const slice = raw.slice(riseIdx, setIdx === -1 ? raw.length : setIdx);
+            const samples = [];
+            for (let i = 0; i < slice.length; i++) {
+                if (slice[i].ok) samples.push(slice[i]);
+            }
+
+            // Les extrémités affinées sont ajoutées comme vrais échantillons :
+            // c'est sur elles que le rendu pose les marqueurs « lever » /
+            // « coucher », il leur faut donc une position à l'écran.
+            if (riseMs !== null) {
+                const p = azAltAt(riseMs);
+                if (p) samples.unshift({ tMs: riseMs, isHour: false, az: p.az, alt: p.alt, ok: true, kind: 'rise' });
+            }
+            if (setMs !== null) {
+                const p = azAltAt(setMs);
+                if (p) samples.push({ tMs: setMs, isHour: false, az: p.az, alt: p.alt, ok: true, kind: 'set' });
+            }
+
+            return { samples: samples, riseMs: riseMs, setMs: setMs };
+        } finally {
+            // Sans ça on fuit un objet WASM à chaque tap sur un astre.
+            clone.destroy();
+        }
+    }
+
     const api = {
         buildSampleTimes: buildSampleTimes,
         formatHourLabel: formatHourLabel,
@@ -166,6 +253,7 @@
         findHorizonCrossing: findHorizonCrossing,
         buildPathData: buildPathData,
         declutterLabels: declutterLabels,
+        sampleTrail: sampleTrail,
     };
     global.SkyTrail = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
