@@ -1,9 +1,14 @@
+'use strict';
+
 // Fixe le fuseau du process AVANT toute construction de Date : c'est la seule
 // façon fiable de forcer node:test à interpréter les heures locales dans un
-// fuseau donné. Doit rester la toute première instruction du fichier.
+// fuseau donné. Doit précéder tout `require` et toute création de Date.
+//
+// `'use strict'` reste en tête : la directive doit être la première INSTRUCTION
+// du fichier pour prendre effet. Placée après cette affectation, elle n'était
+// qu'une expression littérale sans effet, et le fichier tournait en mode
+// non-strict à l'insu de qui le lit.
 process.env.TZ = 'America/New_York';
-
-'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert');
