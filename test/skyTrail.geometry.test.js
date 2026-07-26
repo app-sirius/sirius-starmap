@@ -96,6 +96,69 @@ test('des coordonnées non finies sont traitées comme un trou', () => {
   assert.strictEqual((d.match(/M/g) || []).length, 1, d);
 });
 
+test('après un trou (visible:false), le sous-chemin suivant repart du premier point visible après le trou, pas du dernier point avant', () => {
+  const pts = [
+    { px: 100, py: 200, visible: true },   // A
+    { px: 110, py: 210, visible: true },   // B — dernier point visible avant le trou
+    { px: 120, py: 220, visible: false },  // trou (sous l horizon)
+    { px: 130, py: 230, visible: true },   // C — premier point visible après le trou
+    { px: 140, py: 240, visible: true },   // D
+  ];
+  const d = buildPathData(pts, BOUNDS);
+
+  // Pin exact : une variante buggée qui remet `current` à null sur le trou
+  // mais oublie de remettre `prev` referait démarrer le second sous-chemin
+  // depuis B (M110.0,210.0L130.0,230.0L140.0,240.0), traçant un trait
+  // fantôme par-dessus le trou au lieu de M130.0,230.0L140.0,240.0.
+  assert.strictEqual(d, 'M100.0,200.0L110.0,210.0M130.0,230.0L140.0,240.0', d);
+
+  const subpaths = d.split('M').filter(Boolean);
+  assert.strictEqual(subpaths.length, 2, d);
+  // Le second sous-chemin doit commencer par C, pas par B.
+  assert.ok(
+    subpaths[1].startsWith('130.0,230.0'),
+    `le sous-chemin après le trou doit commencer par C (130.0,230.0) : ${subpaths[1]}`
+  );
+  assert.ok(
+    !subpaths[1].startsWith('110.0,210.0'),
+    `le sous-chemin après le trou ne doit pas repartir de B (pont fantôme sur le trou) : ${subpaths[1]}`
+  );
+  // Le premier sous-chemin doit se terminer sur B, le dernier point visible
+  // avant la coupure — pas avalé ni tronqué plus tôt.
+  assert.ok(
+    subpaths[0].endsWith('110.0,210.0'),
+    `le sous-chemin avant le trou doit se terminer sur B (110.0,210.0) : ${subpaths[0]}`
+  );
+});
+
+test('même propriété pour un trou causé par des coordonnées non finies (autre branche du if)', () => {
+  const pts = [
+    { px: 100, py: 200, visible: true },   // A
+    { px: 110, py: 210, visible: true },   // B — dernier point visible avant le trou
+    { px: NaN, py: 220, visible: true },   // trou (coordonnée non finie)
+    { px: 130, py: 230, visible: true },   // C — premier point visible après le trou
+    { px: 140, py: 240, visible: true },   // D
+  ];
+  const d = buildPathData(pts, BOUNDS);
+
+  assert.strictEqual(d, 'M100.0,200.0L110.0,210.0M130.0,230.0L140.0,240.0', d);
+
+  const subpaths = d.split('M').filter(Boolean);
+  assert.strictEqual(subpaths.length, 2, d);
+  assert.ok(
+    subpaths[1].startsWith('130.0,230.0'),
+    `le sous-chemin après le trou doit commencer par C (130.0,230.0) : ${subpaths[1]}`
+  );
+  assert.ok(
+    !subpaths[1].startsWith('110.0,210.0'),
+    `le sous-chemin après le trou ne doit pas repartir de B (pont fantôme sur le trou) : ${subpaths[1]}`
+  );
+  assert.ok(
+    subpaths[0].endsWith('110.0,210.0'),
+    `le sous-chemin avant le trou doit se terminer sur B (110.0,210.0) : ${subpaths[0]}`
+  );
+});
+
 test('declutterLabels garde un seul label quand deux repères sont à 10 px', () => {
   const marks = [{ px: 100, py: 100 }, { px: 107, py: 107 }];
   assert.strictEqual(declutterLabels(marks, 28).length, 1);
