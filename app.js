@@ -378,6 +378,16 @@ async function initStellarium() {
         // natif (qui ouvre la fiche de l'objet).
         stel.core.change('selection', () => {
             const sel = stel.core.selection;
+            // Avant le court-circuit `suppressSelectionEvent` plus bas : le
+            // tracé doit aussi apparaître sur un « Pointer » programmatique,
+            // pas seulement sur un tap.
+            if (!sel) {
+                safeTrail(function () { SkyTrail.clear(); });
+            } else {
+                safeTrail(function () {
+                    SkyTrail.setTarget(sel, stel.core.observer, displayedNowMs());
+                });
+            }
             if (!sel) {
                 // Désélection (tap dans le vide / sélection externe coupée) :
                 // on arrête de guider/suivre la cible précédente.
@@ -451,7 +461,10 @@ async function initStellarium() {
             deselectBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                stel.core.selection = null;
+                // `= null` ne désélectionne PAS : le moteur rend toujours l'objet
+                // précédent à la lecture suivante. Il faut l'entier 0 — même
+                // piège que `stel.core.lock = 0` dans releaseCameraLock().
+                stel.core.selection = 0;
                 releaseCameraLock();
                 // Le listener change('selection') remet trackedTarget/
                 // selectedDesignations à null ; on masque tout de suite.
@@ -721,6 +734,30 @@ let pendingObserverOrientation = null;
 // à avancer en temps réel depuis ce point.
 let timeOffsetMs = 0;
 
+// Instant que la carte AFFICHE, par opposition à l'heure système : c'est cette
+// expression qui pilote `observer.utc` à chaque frame, et c'est donc d'elle que
+// le tracé de course doit partir (y compris quand l'utilisateur est en
+// simulation via le curseur temps ou le bouton « Simuler » des éclipses).
+function displayedNowMs() {
+    return Date.now() + timeOffsetMs;
+}
+
+// `updateOverlay` n'a aucun try/catch : une exception y tuerait la boucle
+// requestAnimationFrame et figerait d'un coup la flèche, la boussole et les
+// labels d'étoiles. Le tracé de course, qui est du confort, ne doit jamais
+// pouvoir provoquer ça — on l'isole et on le désactive au premier échec.
+let skyTrailFailed = false;
+function safeTrail(fn) {
+    if (skyTrailFailed || typeof SkyTrail === 'undefined') return;
+    try {
+        fn();
+    } catch (e) {
+        skyTrailFailed = true;   // une seule fois : sinon 60 logs par seconde
+        console.error('[stellarium] tracé de course désactivé après erreur', e);
+        try { SkyTrail.clear(); } catch (e2) {}
+    }
+}
+
 /**
  * Libère le verrou caméra posé par pointAt() (le moteur recentre sur l'astre à
  * chaque frame tant qu'il tient).
@@ -841,7 +878,7 @@ function stepInertia(now) {
 
 function updateOverlay() {
     if (stel) {
-        stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        stel.core.observer.utc = displayedNowMs() / 86400000 + 40587;
         // Applique l'orientation gyro en attente, une seule fois par frame et
         // synchronisée au rendu (cf. pendingObserverOrientation + case
         // 'observerOrientation'). On vide après application : au repos (aucun
@@ -872,6 +909,16 @@ function updateOverlay() {
         }
         updateArrow();
         updateCompass();
+        safeTrail(function () {
+            SkyTrail.render({
+                yaw: stel.core.observer.yaw,
+                pitch: stel.core.observer.pitch,
+                roll: stel.core.observer.roll || 0,
+                fov: stel.core.fov,
+                w: window.innerWidth,
+                h: window.innerHeight,
+            }, displayedNowMs());
+        });
         updateStarLabels();
     }
     requestAnimationFrame(updateOverlay);
@@ -1193,8 +1240,10 @@ function handleMessage(data) {
                         stel.core.observer.update();
                     }
                 }
+                // La course dépend de la position de l'observateur.
+                safeTrail(function () { SkyTrail.invalidate(); });
                 break;
-                
+
             case 'lookAt':
                 if (message.target) {
                     if (gyroMode) {
@@ -1215,8 +1264,10 @@ function handleMessage(data) {
                 } else {
                     timeOffsetMs = 0;
                 }
+                // La course part du temps affiché, qui vient de changer.
+                safeTrail(function () { SkyTrail.invalidate(); });
                 break;
-                
+
             case 'toggleLayer':
                 if (message.layer) {
                     const layer = stel.core[message.layer];
