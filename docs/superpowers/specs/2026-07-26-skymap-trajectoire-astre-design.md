@@ -61,6 +61,43 @@ ne servirait à rien, puisque `updateOverlay` le réécrit à chaque frame (l. 8
 veut savoir, c'est que le clone n'a pas corrompu les positions calculées depuis l'observateur
 vivant.
 
+### Résultat du spike (2026-07-26) — concluant
+
+`clone()` fait exactement ce qu'on espérait. Lune à **alt 35,07° / az 167,36°** maintenant,
+**alt −0,27° / az 238,99°** dans 6 h (elle se couche) — 35,3° d'écart en altitude, donc
+l'éphéméride est bien recalculée. L'observateur vivant ressort **identique au bit près**
+(`utc` inchangé, position recalculée identique à 1e-9). 500 cycles `clone/update/destroy`
+en 50 ms, sans plantage.
+
+**Coût mesuré de l'échantillonnage** (85 positions de la Lune, ce que fera `setTarget`) :
+**33,5 ms au premier appel**, puis **6,5 puis 5,2 ms**. Le budget de 16 ms est donc respecté à
+chaud, et le repli « pas de 20 min » est inutile. Le premier tap après chargement de la page
+coûte une frame sautée — acceptable, et non récupérable de toute façon (c'est le préchauffage
+des caches moteur, pas notre code).
+
+Le spike a par ailleurs mis au jour **quatre pièges de l'API moteur** qui invalidaient des
+morceaux du plan d'implémentation. Ils sont documentés ici parce qu'ils contraignent la
+conception, pas seulement l'écriture :
+
+1. **`obj.getInfo('type', obs)` renvoie `undefined`.** Idem pour `'altaz'`, `'name'`,
+   `'types'`, `'klass'`. Seules répondent `vmag`, `distance`, `phase`, `radius`, `radec`. Le
+   type d'un objet se lit sur **`obj.jsonData.types`** — un tableau dont le premier élément
+   est le code court : Jupiter `["Pla","SSO","?"]`, Lune `["Moo",…]`, Soleil `["Sun",…]`.
+   L'exclusion des satellites doit donc passer par `jsonData.types`, pas par `getInfo`.
+2. **`stel.core.selection = null` ne désélectionne pas.** La lecture suivante rend toujours
+   l'ancien objet, même après une frame moteur. Il faut écrire **`= 0`** — exactement le même
+   piège que `stel.core.lock = 0`. Conséquence hors périmètre mais à signaler : `app.js:454`
+   (croix de désélection) utilise `= null` et ne désélectionne donc pas réellement.
+3. **`stel.getObj('Moon')` renvoie `null`** ; il faut `'NAME Moon'`. C'est ce que gère déjà
+   `resolveObject()` (`app.js:626`), à utiliser dans tout extrait de vérification manuelle.
+4. **`window.stel` n'existe pas** : `app.js` déclare `let stel` au niveau script, ce qui ne
+   crée pas de propriété sur `window`. L'identifiant nu `stel` fonctionne (portée globale
+   lexicale). Sans importance pour le code livré, mais piégeux depuis la console.
+
+Enfin, un onglet en arrière-plan ne fait pas tourner `requestAnimationFrame` : le moteur ne
+charge alors ni les catalogues d'étoiles, ni les constellations, ni les satellites. Toute
+vérification manuelle doit se faire **onglet au premier plan**.
+
 **Repli si le clone ne convient pas** : pour les étoiles, la position ICRF est constante à
 l'échelle d'une session (mouvement propre < 1"/an), donc la course est une pure rotation
 diurne calculable analytiquement à partir de l'angle horaire. Ne resteraient que la Lune, le

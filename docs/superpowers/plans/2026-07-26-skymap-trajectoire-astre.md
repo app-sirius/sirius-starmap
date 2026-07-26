@@ -12,6 +12,8 @@
 
 **État de validation :** le code et les tests des tâches 2, 4, 5 et 6 ont été exécutés hors dépôt avant l'écriture de ce plan — 37 tests au vert. Les valeurs de référence numériques, la logique lever/coucher et les cas dégénérés de `buildPathData` sont donc vérifiés, pas seulement relus. Les tâches 3, 7 et 8 touchent le DOM et le moteur WASM : elles se vérifient dans le navigateur, via les checklists fournies.
 
+**Task 1 est faite** (spike `observer.clone()`, concluant — résultats et quatre pièges d'API dans la spec §0). Ce plan a été corrigé en conséquence : détection de type par `jsonData.types`, désélection par `= 0`, `resolveObject()` dans les extraits de console. Commencer à la Task 2.
+
 ## Global Constraints
 
 - Repo de travail : `stellarium/` uniquement. **Aucun** changement dans `app/` (React Native), **aucun** nouveau message sur le pont RN ↔ WebView.
@@ -464,8 +466,14 @@ cd stellarium && npm run serve
 Dans Chrome sur `http://localhost:8000` :
 - Les noms d'étoiles brillantes s'affichent au même endroit qu'avant (comparer avec une capture prise avant le refactor, ou avec `git stash`).
 - Panner le ciel : les labels suivent sans décalage ni saccade.
-- Dans la console : `stel.core.selection = stel.getObj('Jupiter')` puis panner jusqu'à sortir Jupiter du champ — la flèche apparaît et pointe bien vers Jupiter (la faire tourner autour de l'écran en pannant pour vérifier les quatre quadrants).
+- Dans la console : `stel.core.selection = resolveObject('Jupiter')` puis panner jusqu'à sortir Jupiter du champ — la flèche apparaît et pointe bien vers Jupiter (la faire tourner autour de l'écran en pannant pour vérifier les quatre quadrants).
 - Aucune erreur dans la console.
+
+**Pièges de console relevés au spike** (cf. spec §0), valables pour toutes les vérifications manuelles du plan :
+- `window.stel` n'existe pas — utiliser l'identifiant nu `stel`.
+- `stel.getObj('Jupiter')` renvoie `null` : il faut `'NAME Jupiter'`, ou mieux `resolveObject('Jupiter')` qui essaie toutes les variantes.
+- Pour désélectionner, écrire `stel.core.selection = 0`. **`= null` ne désélectionne pas.**
+- Garder l'onglet **au premier plan** : en arrière-plan `requestAnimationFrame` est suspendu, le moteur ne charge alors ni étoiles, ni constellations, ni satellites.
 
 - [ ] **Step 5: Vérifier que les tests passent toujours**
 
@@ -1401,10 +1409,26 @@ Dans `stellarium/skyTrail.js`, insérer avant le bloc `const api = {` :
         dirty = true;
     }
 
+    // Le type d'un objet se lit sur `jsonData.types` (tableau dont le premier
+    // élément est le code court : "Pla", "Moo", "Sun", "Sat"…). PAS via
+    // `getInfo('type', obs)`, qui renvoie `undefined` — vérifié au spike, cf.
+    // §0 de la spec. C'est aussi pour ça que la détection de constellation
+    // reste basée sur les désignations ("CON western UMa").
+    function objectTypes(obj) {
+        try {
+            const d = obj.jsonData;
+            return (d && Array.isArray(d.types)) ? d.types : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
     // Une constellation n'a pas de position ponctuelle, un satellite boucle en
     // ~90 min : ni l'un ni l'autre n'a de course lisible sur 12 h.
-    function isExcluded(designations, type) {
-        if (type === 'Sat' || type === 'Con') return true;
+    function isExcluded(designations, types) {
+        for (let i = 0; i < types.length; i++) {
+            if (types[i] === 'Sat' || types[i] === 'Con') return true;
+        }
         for (let i = 0; i < designations.length; i++) {
             if (designations[i].indexOf('CON ') === 0) return true;
         }
@@ -1422,9 +1446,7 @@ Dans `stellarium/skyTrail.js`, insérer avant le bloc `const api = {` :
         }
         let designations = [];
         try { designations = obj.designations() || []; } catch (e) { designations = []; }
-        let type = null;
-        try { type = obj.getInfo('type', observer); } catch (e) { type = null; }
-        if (isExcluded(designations, type)) { clear(); return; }
+        if (isExcluded(designations, objectTypes(obj))) { clear(); return; }
 
         target = { designations: designations };
         cache = null;
@@ -1633,7 +1655,7 @@ cd stellarium && npm run serve
 Dans la console Chrome, une fois le ciel affiché :
 
 ```js
-const jup = stel.getObj('Jupiter');
+const jup = resolveObject('Jupiter');   // getObj('Jupiter') renvoie null — cf. spec §0
 stel.core.selection = jup;
 SkyTrail.setTarget(jup, stel.core.observer, Date.now());
 // Boucle de rendu temporaire, le temps de la vérification.
@@ -1651,7 +1673,7 @@ Attendu :
 - En pannant et en zoomant, le tracé reste collé au ciel.
 - Aucune erreur dans la console, aucun segment traversant tout l'écran.
 
-Nettoyer avec `clearInterval(window.__t); SkyTrail.clear();`.
+Nettoyer avec `clearInterval(window.__t); SkyTrail.clear(); stel.core.selection = 0;`.
 
 - [ ] **Step 6: Commit**
 
@@ -1666,7 +1688,7 @@ git commit -m "feat: couche SVG et rendu du tracé de course"
 ### Task 8: Câbler le tracé dans `app.js`
 
 **Files:**
-- Modify: `stellarium/app.js:379-443` (listener de sélection), `app.js:842-878` (`updateOverlay`), `app.js:1208-1240` (`handleMessage`), plus un helper et un garde-fou près de `timeOffsetMs` (l. 722)
+- Modify: `stellarium/app.js:379-443` (listener de sélection), `app.js:454` (désélection `= 0`), `app.js:842-878` (`updateOverlay`), `app.js:1208-1240` (`handleMessage`), plus un helper et un garde-fou près de `timeOffsetMs` (l. 722)
 
 **Interfaces:**
 - Consumes: `SkyTrail.setTarget` / `invalidate` / `clear` / `render` (Task 7)
@@ -1784,7 +1806,41 @@ Puis, dans le cas `setTime`, avant le `break;` (l. 1240), insérer :
                 safeTrail(function () { SkyTrail.invalidate(); });
 ```
 
-- [ ] **Step 5: Vérifier que les tests passent toujours**
+- [ ] **Step 5: Corriger la désélection moteur (`= 0` au lieu de `= null`)**
+
+Bug préexistant découvert au spike (spec §0, point 2) : **`stel.core.selection = null` ne
+désélectionne pas** — la lecture suivante rend toujours l'ancien objet, même après une frame
+moteur. Seul `= 0` fonctionne, exactement comme `stel.core.lock`. La croix `✕` de la pastille
+de guidage (`app.js:454`) utilise `= null` : elle masque bien la flèche localement, mais le
+moteur garde la sélection et continue de dessiner son propre marqueur.
+
+Le tracé de course s'efface sur `change('selection')` quand la sélection est vide. Sans ce
+correctif, la croix `✕` ne l'effacerait donc jamais.
+
+Dans `stellarium/app.js`, dans le handler du bouton `#arrow-label-close`, remplacer :
+
+```js
+                stel.core.selection = null;
+```
+
+par :
+
+```js
+                // `= null` ne désélectionne PAS : le moteur rend toujours l'objet
+                // précédent à la lecture suivante. Il faut l'entier 0 — même
+                // piège que `stel.core.lock = 0` dans releaseCameraLock().
+                stel.core.selection = 0;
+```
+
+Vérifier qu'aucun autre `selection = null` ne subsiste :
+
+```bash
+cd stellarium && grep -n "selection = null" app.js
+```
+
+Attendu : aucune ligne.
+
+- [ ] **Step 6: Vérifier que les tests passent toujours**
 
 ```bash
 cd stellarium && npm test
@@ -1792,7 +1848,7 @@ cd stellarium && npm test
 
 Attendu : `# fail 0`, 37 tests.
 
-- [ ] **Step 6: Vérification manuelle complète**
+- [ ] **Step 7: Vérification manuelle complète**
 
 ```bash
 cd stellarium && npm run serve
@@ -1800,23 +1856,25 @@ cd stellarium && npm run serve
 
 Sur `http://localhost:8000`, cocher chaque point :
 
+Onglet **au premier plan** (en arrière-plan le moteur ne charge ni étoiles, ni constellations, ni satellites), et `resolveObject(...)` plutôt que `stel.getObj(...)` — cf. spec §0.
+
 | Cas | Attendu |
 |---|---|
 | Taper une étoile brillante (Véga) | Arc rouge tracé, points horaires alignés, marqueur de coucher |
 | Taper la Lune, puis Jupiter | La courbe s'écarte visiblement de la pure rotation diurne — preuve que l'éphéméride est recalculée à chaque instant, pas seulement l'observateur |
-| Le Soleil en pleine journée (`stel.core.selection = stel.getObj('Sun')`) | Tracé visible malgré le ciel bleu |
-| Astre circumpolaire depuis Paris (`stel.getObj('Polaris')`, `stel.getObj('Dubhe')`) | Tracé de 12 h, aucun marqueur de coucher |
+| Le Soleil en pleine journée (`stel.core.selection = resolveObject('Sun')`) | Tracé visible malgré le ciel bleu |
+| Astre circumpolaire depuis Paris (`resolveObject('Polaris')`, `resolveObject('Dubhe')`) | Tracé de 12 h, aucun marqueur de coucher |
 | Astre non levé (chercher un astre sous l'horizon puis le pointer) | Tracé qui démarre sur un marqueur « lever HHhMM » |
-| ISS (`stel.core.selection = stel.getObj('ISS')`) | Aucun tracé |
-| Une constellation (taper une ligne de constellation) | Aucun tracé |
+| ISS (`stel.core.selection = resolveObject('ISS')`) | Aucun tracé. **Relever `resolveObject('ISS').jsonData.types` et confirmer que `'Sat'` y figure** — le spike n'a pas pu le vérifier, la source satellites ne se charge pas en arrière-plan |
+| Une constellation (taper une ligne de constellation) | Aucun tracé. Relever aussi ses `jsonData.types` |
 | Taper dans le vide | Tracé effacé |
-| Croix `✕` de la pastille de guidage | Tracé effacé |
+| Croix `✕` de la pastille de guidage | Tracé effacé (dépend du correctif du Step 5 ci-dessous) |
 | Curseur temps déplacé (depuis l'app, ou `handleMessage({type:'setTime', time:new Date(Date.now()+5*3600e3).toISOString()})`) | Tracé recalculé depuis la nouvelle heure affichée |
 | Dézoom complet | Tracé lisible, labels espacés d'au moins ~28 px, aucun segment aberrant traversant l'écran |
 | Laisser tourner 5 min sur un astre sélectionné | La tête du tracé reste collée à l'astre (recalcul toutes les 60 s) |
 | Taper 50 astres d'affilée | Pas de ralentissement ; onglet Memory de Chrome stable (pas de fuite de clones WASM) |
 
-- [ ] **Step 7: Profiler le coût du calcul**
+- [ ] **Step 8: Profiler le coût du calcul**
 
 Dans la console Chrome :
 
@@ -1828,9 +1886,11 @@ SkyTrail.setTarget(v, stel.core.observer, Date.now());
 console.log('setTarget:', (performance.now() - t0).toFixed(1), 'ms');
 ```
 
-Attendu : **< 16 ms** (une frame).
+Attendu : **< 16 ms** (une frame). Le spike a mesuré **5,2 à 6,5 ms** à chaud pour 85 positions de la Lune (cf. spec §0), donc la marge est confortable — mais mesurer quand même, `setTarget` fait un peu plus que la boucle du spike.
 
-Si c'est au-dessus, appliquer le repli de la spec — passer le pas d'échantillonnage à 20 min. Cela se fait en une ligne, en modifiant `DEFAULT_STEP_MS` dans `skyTrail.js` :
+**Premier appel après chargement de la page : ~34 ms attendues.** C'est le préchauffage des caches moteur, pas notre code ; ça se traduit par une frame sautée sur le tout premier tap et il n'y a rien à en faire. Ne pas confondre avec un dépassement de budget : relancer la mesure deux fois et retenir les appels à chaud.
+
+Si les appels à chaud dépassent 16 ms, appliquer le repli de la spec — passer le pas d'échantillonnage à 20 min. Cela se fait en une ligne, en modifiant `DEFAULT_STEP_MS` dans `skyTrail.js` :
 
 ```js
     const DEFAULT_STEP_MS = 20 * MINUTE_MS;
@@ -1838,7 +1898,7 @@ Si c'est au-dessus, appliquer le repli de la spec — passer le pas d'échantill
 
 Puis ajuster dans `test/skyTrail.time.test.js` les deux tests qui vérifient le pas (`le pas de base est respecté` : remplacer `10 * MIN` par `20 * MIN`) et relancer `npm test`. Relever la nouvelle mesure. Si elle dépasse encore 16 ms, **s'arrêter et remonter le problème** : étaler le calcul sur plusieurs frames est une refonte de `render`, pas un ajustement.
 
-- [ ] **Step 8: Vérifier dans l'app mobile**
+- [ ] **Step 9: Vérifier dans l'app mobile**
 
 Le tracé doit se comporter correctement dans la WebView, en particulier avec le gyroscope et le mode AR (la compensation de roll passe par la même fonction que les labels d'étoiles, mais ça se vérifie).
 
@@ -1852,7 +1912,7 @@ Pointer `EXPO_PUBLIC_STELLARIUM_URL` sur le serveur local, ouvrir l'onglet carte
 - Passer en mode AR : le tracé reste aligné sur le ciel.
 - « Simuler » depuis la page éclipse : le tracé part bien de l'instant simulé, pas de l'heure réelle.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 cd stellarium
@@ -1876,7 +1936,8 @@ git commit -m "feat: afficher la course d un astre à sa sélection sur la carte
 | §3 Coucher affiné par dichotomie | 5, 6 |
 | §3 Astre sous l'horizon → marqueur de lever | 6 |
 | §3 Cache indépendant de la caméra, invalidations, dérive 60 s | 7, 8 |
-| §3 Exclusion des `Sat` et `Con` | 7 |
+| §3 Exclusion des `Sat` et `Con` (via `jsonData.types`, pas `getInfo('type')`) | 7, vérif. des valeurs réelles en 8 |
+| §0 Désélection moteur par `= 0` (bug préexistant `app.js:454`) | 8 |
 | §3 Budget < 16 ms, repli pas de 20 min | 8 |
 | §4 Couche SVG z-index 2, quatre paths d'opacité décroissante | 7 |
 | §4 Découpe aux trous et hors boîte 3× | 5, 7 |
