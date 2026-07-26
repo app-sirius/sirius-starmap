@@ -948,6 +948,12 @@ function buildStarLabels() {
 // Label masqué si sous l'horizon, derrière la caméra, ou hors écran.
 function updateStarLabels() {
     if (!stel || !starLabels.length) return;
+    // Tourne dans updateOverlay(), qui n'a aucun try/catch : si skyProjection.js
+    // n'a pas chargé (script manquant/réseau flaky), SkyProjection est
+    // undefined et l'appeler plus bas planterait toute la boucle de rendu
+    // (flèche, boussole, labels, horloge). On dégrade silencieusement au
+    // lieu de figer la carte.
+    if (typeof SkyProjection === 'undefined') return;
 
     // Note: pas de throttle temporel ici. Le moteur dessine les étoiles à
     // 60 fps ; capper nos labels HTML plus bas crée un décalage visible
@@ -1153,6 +1159,15 @@ function updateCompass() {
 function updateArrow() {
     const arrowEl = document.getElementById('arrow');
     const labelEl = document.getElementById('arrow-label');
+    // Tourne dans updateOverlay(), qui n'a aucun try/catch : si skyProjection.js
+    // n'a pas chargé, SkyProjection est undefined et l'appel plus bas
+    // planterait toute la boucle de rendu. On dégrade en masquant la flèche
+    // au lieu de la laisser bloquée visible, plutôt que de figer la carte.
+    if (typeof SkyProjection === 'undefined') {
+        arrowEl.classList.remove('visible');
+        labelEl.classList.remove('visible');
+        return;
+    }
     if (!trackedTarget) {
         arrowEl.classList.remove('visible');
         labelEl.classList.remove('visible');

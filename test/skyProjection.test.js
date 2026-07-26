@@ -48,7 +48,7 @@ test('roll de 90° transforme un décalage horizontal en vertical', () => {
   assert.ok(Math.abs(p.py - (400 - 2 * FOCAL)) < 1e-6, `py=${p.py}`);
 });
 
-test('astre à l antipode du centre de vue → behind, pas de NaN propagé', () => {
+test('astre à l antipode du centre de vue → behind, px/py non finis mais sxr/syr exploitables', () => {
   const p = projectAzAlt(Math.PI, 0, CAM);
   assert.strictEqual(p.behind, true);
   assert.strictEqual(p.onScreen, false);

@@ -282,7 +282,7 @@ SkyTrail.render(cam, nowMs)                // reprojette et écrit dans le SVG
 ```
 
 `render` reçoit `nowMs` en plus de `cam` : c'est lui qui rogne la tête du tracé au fil du
-temps et qui détecte la dérive de plus de 10 min déclenchant un recalcul. Sans ce paramètre,
+temps et qui détecte la dérive de plus de 60 s déclenchant un recalcul. Sans ce paramètre,
 le module n'aurait aucun moyen de savoir quelle heure la carte affiche.
 
 Quatre points de branchement dans `app.js`, rien de plus :
