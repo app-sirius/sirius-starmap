@@ -893,13 +893,12 @@ function buildStarLabels() {
     }
 }
 
-// Projection stéréographique caméra→écran (celle qu'utilise Stellarium
-// Web par défaut). On calcule (sx, sy, cosA) = vecteur unitaire vers
-// l'astre exprimé dans la base caméra (right, up, forward), puis on
-// applique la projection stéréographique depuis l'antipode du forward.
-// Le focal est calé sur le plus petit côté de l'écran (convention engine
-// pour `core.fov`). Label masqué si sous l'horizon, derrière la caméra,
-// ou hors écran.
+// Positionne les labels HTML des étoiles brillantes (BRIGHT_STARS) au-dessus
+// de leur astre à l'écran, une fois par frame. Résout paresseusement chaque
+// objet moteur, court-circuite si la caméra n'a pas bougé ou si l'étoile est
+// sous l'horizon/masquée par le moteur (sélection), puis délègue la
+// projection caméra→écran à `SkyProjection.projectAzAlt` (skyProjection.js).
+// Label masqué si sous l'horizon, derrière la caméra, ou hors écran.
 function updateStarLabels() {
     if (!stel || !starLabels.length) return;
 
@@ -1143,14 +1142,14 @@ function updateArrow() {
             fov: stel.core.fov, w: window.innerWidth, h: window.innerHeight,
         });
         // On ne se sert que de la direction écran : la flèche est ancrée au
-        // centre et pivote vers l'astre hors champ. Le vecteur centre→astre
-        // donne exactement l'ancien angle : px - w/2 = sxr·k·focal et
-        // py - h/2 = -syr·k·focal, avec k·focal > 0, donc
-        // atan2(py - h/2, px - w/2) = atan2(-syr, sxr).
-        const screenAngle = Math.atan2(
-            proj.py - window.innerHeight / 2,
-            proj.px - window.innerWidth / 2
-        );
+        // centre et pivote vers l'astre hors champ. On utilise `sxr`/`syr`
+        // (toujours finis) plutôt que `px`/`py` : `px`/`py` valent NaN quand
+        // la cible est derrière la caméra (`proj.behind`), ce qui est
+        // justement le cas courant pour cette flèche — l'objet suivi est
+        // très souvent hors champ, parfois à l'opposé du regard. La
+        // direction reste bien définie à l'antipode, seule l'échelle
+        // stéréographique diverge, donc pas besoin de garder `px`/`py` ici.
+        const screenAngle = Math.atan2(-proj.syr, proj.sxr);
 
         arrowEl.style.left = '50%';
         arrowEl.style.top = '50%';

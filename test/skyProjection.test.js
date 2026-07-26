@@ -53,6 +53,45 @@ test('astre à l antipode du centre de vue → behind, pas de NaN propagé', () 
   assert.strictEqual(p.behind, true);
   assert.strictEqual(p.onScreen, false);
   assert.ok(!Number.isFinite(p.px));
+  assert.ok(!Number.isFinite(p.py));
+  // sxr/syr portent la direction et restent finis même quand px/py ne le
+  // sont pas : c'est ce qui permet à updateArrow() de faire pivoter la
+  // flèche vers une cible derrière la caméra sans jamais produire de NaN.
+  assert.ok(Number.isFinite(p.sxr), `sxr=${p.sxr}`);
+  assert.ok(Number.isFinite(p.syr), `syr=${p.syr}`);
+});
+
+test('atan2(-syr, sxr) reste fini sur un balayage complet, y compris à l antipode', () => {
+  for (let deg = 0; deg < 360; deg += 5) {
+    const az = deg * Math.PI / 180;
+    for (const alt of [-0.3, 0, 0.3, 1.2]) {
+      const p = projectAzAlt(az, alt, CAM);
+      const angle = Math.atan2(-p.syr, p.sxr);
+      assert.ok(Number.isFinite(angle), `az=${az} alt=${alt} → angle=${angle}`);
+    }
+  }
+});
+
+test('atan2(-syr, sxr) coïncide avec atan2(py - h/2, px - w/2) hors behind', () => {
+  // Cas non-behind : les deux formules doivent coïncider exactement (à
+  // l'epsilon flottant près), ce qui garantit que remplacer px/py par
+  // sxr/syr dans updateArrow() ne change aucun comportement existant.
+  const cases = [
+    [Math.PI / 2, 0],
+    [Math.PI / 4, 0.2],
+    [-Math.PI / 3, -0.1],
+    [0.9, 0.6],
+  ];
+  for (const [az, alt] of cases) {
+    const p = projectAzAlt(az, alt, CAM);
+    assert.strictEqual(p.behind, false);
+    const viaTangent = Math.atan2(-p.syr, p.sxr);
+    const viaScreen = Math.atan2(p.py - CAM.h / 2, p.px - CAM.w / 2);
+    assert.ok(
+      Math.abs(anpm(viaTangent - viaScreen)) < 1e-9,
+      `az=${az} alt=${alt} → tangent=${viaTangent} screen=${viaScreen}`
+    );
+  }
 });
 
 test('altitude négative → belowHorizon, mais les coordonnées restent calculées', () => {

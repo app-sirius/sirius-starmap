@@ -21,6 +21,14 @@
     // cam = { yaw, pitch, roll, fov, w, h, margin? }, tous les angles en radians.
     // Renvoie la position écran de l'astre, plus les drapeaux dont les appelants
     // ont besoin pour décider s'ils l'affichent.
+    //
+    // `sxr`/`syr` (composantes tangentielles roll-compensées) sont toujours
+    // finies, y compris quand `behind` est vrai : elles portent la direction
+    // vers l'astre mais pas la distance (l'échelle stéréographique `k`
+    // diverge à l'antipode, pas la direction elle-même). Un appelant qui n'a
+    // besoin que d'un angle (ex. une flèche à faire pivoter) doit utiliser
+    // `Math.atan2(-syr, sxr)` plutôt que `px`/`py`, précisément parce que ça
+    // reste valable quand la cible est derrière la caméra.
     function projectAzAlt(objAz, objAlt, cam) {
         const camAz = cam.yaw;
         const camAlt = cam.pitch;
@@ -30,21 +38,6 @@
         const dAz = anpm(objAz - camAz);
         const cosA = Math.sin(camAlt) * Math.sin(objAlt)
                    + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
-
-        const result = {
-            px: NaN,
-            py: NaN,
-            cosA: cosA,
-            onScreen: false,
-            behind: false,
-            belowHorizon: objAlt <= 0,
-        };
-
-        // cosA = -1 : l'astre est à l'antipode du centre de vue, k diverge.
-        if (cosA <= -0.999) {
-            result.behind = true;
-            return result;
-        }
 
         const sx = Math.sin(dAz) * Math.cos(objAlt);
         const sy = Math.sin(objAlt) * Math.cos(camAlt)
@@ -58,6 +51,23 @@
         const sinRoll = Math.sin(camRoll);
         const sxr = cosRoll * sx - sinRoll * sy;
         const syr = sinRoll * sx + cosRoll * sy;
+
+        const result = {
+            px: NaN,
+            py: NaN,
+            cosA: cosA,
+            sxr: sxr,
+            syr: syr,
+            onScreen: false,
+            behind: false,
+            belowHorizon: objAlt <= 0,
+        };
+
+        // cosA = -1 : l'astre est à l'antipode du centre de vue, k diverge.
+        if (cosA <= -0.999) {
+            result.behind = true;
+            return result;
+        }
 
         // Focale calée sur le plus petit côté de l'écran : c'est la convention
         // du moteur pour `core.fov`.
