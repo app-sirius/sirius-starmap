@@ -991,7 +991,7 @@ git commit -m "feat: dichotomie d horizon, construction du chemin SVG, anti-coll
 
 ### Task 6: `skyTrail.js` — échantillonnage de la course via le moteur
 
-Le cœur de la fonctionnalité. Testable intégralement avec un faux moteur : `sampleTrail` reçoit le moteur en paramètre plutôt que de lire `globalThis.stel`.
+Le cœur de la fonctionnalité. Testable intégralement avec un faux moteur : `sampleTrail` reçoit le moteur en paramètre plutôt que de le chercher dans la portée globale.
 
 **Files:**
 - Modify: `stellarium/skyTrail.js`
@@ -1357,7 +1357,7 @@ Dans `stellarium/skyTrail.js`, insérer avant le bloc `const api = {` :
 
 ```js
     // ---- Partie moteur + DOM ----------------------------------------------
-    // Tout ce qui suit touche `globalThis.stel` ou `document`, mais UNIQUEMENT
+    // Tout ce qui suit touche le moteur (`stel`) ou `document`, mais UNIQUEMENT
     // dans le corps des fonctions : le module doit rester require()-able sous
     // Node pour les tests.
 
@@ -1460,7 +1460,14 @@ Dans `stellarium/skyTrail.js`, insérer avant le bloc `const api = {` :
         // `render` relancerait 85 requêtes moteur à chaque frame.
         cache = { samples: [], computedAtMs: nowMs };
 
-        const engine = globalThis.stel;
+        // PAS `globalThis.stel` : `app.js` déclare `let stel` au niveau script,
+        // ce qui crée une liaison lexicale globale et NON une propriété de
+        // l'objet global. `globalThis.stel` et `window.stel` valent toujours
+        // `undefined` — vérifié dans le navigateur, moteur chargé. Lire
+        // `globalThis.stel` ici ferait échouer chaque recalcul en silence : pas
+        // d'exception, pas de log, juste un tracé qui ne s'affiche jamais.
+        // `typeof` protège l'exécution sous Node, où `stel` n'existe pas.
+        const engine = typeof stel !== 'undefined' ? stel : undefined;
         if (!engine || !target) return;
         const sel = engine.core.selection;
         if (!sel) { target = null; return; }
@@ -1636,7 +1643,7 @@ Et compléter l'export :
 
 - [ ] **Step 4: Vérifier que les tests existants passent toujours**
 
-Le module doit rester requérable sous Node malgré les références à `document` et `globalThis.stel` — elles ne sont atteintes que dans le corps des fonctions.
+Le module doit rester requérable sous Node malgré les références à `document` et `stel` — elles ne sont atteintes que dans le corps des fonctions, et l'accès au moteur passe par `typeof stel !== 'undefined'`.
 
 ```bash
 cd stellarium && npm test
