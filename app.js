@@ -964,13 +964,11 @@ function updateStarLabels() {
     lastStarLabelsCamRoll = camRoll;
     lastStarLabelsFov = fov;
 
-    const cosRoll = Math.cos(camRoll);
-    const sinRoll = Math.sin(camRoll);
-    const halfFov = fov / 2;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const focal = (Math.min(w, h) / 2) / (2 * Math.tan(halfFov / 2));
-    const margin = 40;
+    const cam = {
+        yaw: camAz, pitch: camAlt, roll: camRoll, fov: fov,
+        w: window.innerWidth, h: window.innerHeight,
+        margin: 40,   // tolérance de débord avant de masquer le label
+    };
 
     for (const sl of starLabels) {
         if (!sl.obj) {
@@ -1011,6 +1009,9 @@ function updateStarLabels() {
         const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);
         const [objAz, objAlt] = stel.c2s(pObs);
 
+        // Court-circuit avant projection : à tout instant la moitié du
+        // catalogue est sous l'horizon, autant ne pas la projeter. Le test est
+        // redondant avec `proj.belowHorizon`, mais il évite le calcul.
         if (objAlt <= 0) {
             if (sl._visible !== false) {
                 sl.el.classList.remove('visible');
@@ -1019,36 +1020,10 @@ function updateStarLabels() {
             continue;
         }
 
-        const dAz = stel.anpm(objAz - camAz);
-        const cosA = Math.sin(camAlt) * Math.sin(objAlt)
-                   + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
-        // cosA = -1 (astre derrière, antipode) → singularité de la projection
-        if (cosA <= -0.999) {
-            if (sl._visible !== false) {
-                sl.el.classList.remove('visible');
-                sl._visible = false;
-            }
-            continue;
-        }
-
-        const sx = Math.sin(dAz) * Math.cos(objAlt);
-        const sy = Math.sin(objAlt) * Math.cos(camAlt)
-                 - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
-
-        // Compense le roll caméra : sans ça, les labels HTML restent
-        // alignés à l'écran tandis que le canvas WebGL tourne avec
-        // l'inclinaison du téléphone → décalage visible. Le sens de la
-        // rotation est l'inverse de la rotation appliquée par le moteur
-        // au canvas : ses étoiles tournent dans un sens, nos labels les
-        // suivent dans l'autre repère écran.
-        const sxr =  cosRoll * sx - sinRoll * sy;
-        const syr =  sinRoll * sx + cosRoll * sy;
-
-        const k = 2 / (1 + cosA);
-        const px = w / 2 + sxr * k * focal;
-        const py = h / 2 - syr * k * focal;
-
-        if (px < -margin || px > w + margin || py < -margin || py > h + margin) {
+        // `onScreen` intègre la marge portée par `cam` : un seul endroit décide
+        // du hors-champ, ici comme pour la flèche et le tracé de course.
+        const proj = SkyProjection.projectAzAlt(objAz, objAlt, cam);
+        if (proj.behind || !proj.onScreen) {
             if (sl._visible !== false) {
                 sl.el.classList.remove('visible');
                 sl._visible = false;
@@ -1057,7 +1032,7 @@ function updateStarLabels() {
         }
 
         // -50%, -180% replaces the static CSS transform we removed.
-        sl.el.style.transform = `translate3d(${px}px, ${py}px, 0) translate(-50%, -180%)`;
+        sl.el.style.transform = `translate3d(${proj.px}px, ${proj.py}px, 0) translate(-50%, -180%)`;
         if (sl._visible !== true) {
             sl.el.classList.add('visible');
             sl._visible = true;
@@ -1151,7 +1126,6 @@ function updateArrow() {
     const camAlt = obs.pitch;
     const camRoll = obs.roll || 0;
     const dAz = stel.anpm(objAz - camAz);
-    const dAlt = objAlt - camAlt;
 
     const cosA = Math.sin(camAlt) * Math.sin(objAlt)
                + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
@@ -1164,14 +1138,19 @@ function updateArrow() {
         arrowEl.classList.remove('visible');
         labelEl.classList.remove('visible');
     } else {
-        const sx = Math.sin(dAz) * Math.cos(objAlt);
-        const sy = Math.sin(objAlt) * Math.cos(camAlt)
-                 - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
-        // Compense le roll caméra (cf. updateStarLabels).
-        const cosRoll = Math.cos(camRoll), sinRoll = Math.sin(camRoll);
-        const sxr =  cosRoll * sx - sinRoll * sy;
-        const syr =  sinRoll * sx + cosRoll * sy;
-        const screenAngle = Math.atan2(-syr, sxr);
+        const proj = SkyProjection.projectAzAlt(objAz, objAlt, {
+            yaw: camAz, pitch: camAlt, roll: camRoll,
+            fov: stel.core.fov, w: window.innerWidth, h: window.innerHeight,
+        });
+        // On ne se sert que de la direction écran : la flèche est ancrée au
+        // centre et pivote vers l'astre hors champ. Le vecteur centre→astre
+        // donne exactement l'ancien angle : px - w/2 = sxr·k·focal et
+        // py - h/2 = -syr·k·focal, avec k·focal > 0, donc
+        // atan2(py - h/2, px - w/2) = atan2(-syr, sxr).
+        const screenAngle = Math.atan2(
+            proj.py - window.innerHeight / 2,
+            proj.px - window.innerWidth / 2
+        );
 
         arrowEl.style.left = '50%';
         arrowEl.style.top = '50%';
