@@ -249,6 +249,278 @@
         }
     }
 
+    // ---- Partie moteur + DOM ----------------------------------------------
+    // Tout ce qui suit touche `stel` (l'identifiant nu, cf. note dans
+    // `recompute`) ou `document`, mais UNIQUEMENT dans le corps des
+    // fonctions : le module doit rester require()-able sous Node pour les
+    // tests.
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const BUCKETS = 4;
+    const LABEL_MIN_DIST_PX = 28;
+    const MARK_MARGIN_PX = 40;
+    // Rogner le tracé ne peut retirer que des points entiers : au-delà d une
+    // minute de dérive, sa tête se détacherait visiblement de l astre.
+    const RECOMPUTE_DRIFT_MS = 60 * 1000;
+
+    let enabled = true;
+    let target = null;      // { designations }
+    let cache = null;       // { samples, computedAtMs }
+    let dirty = false;
+    let dom = null;
+    let lastCam = null;
+
+    function ensureDom() {
+        if (dom) return dom;
+        if (typeof document === 'undefined') return null;
+        const svg = document.getElementById('sky-trail');
+        if (!svg) return null;
+        dom = {
+            svg: svg,
+            paths: Array.prototype.slice.call(svg.querySelectorAll('.sky-trail-seg')),
+            marks: document.getElementById('sky-trail-marks'),
+        };
+        return dom;
+    }
+
+    function applyHidden() {
+        const d = ensureDom();
+        if (!d) return;
+        for (let i = 0; i < d.paths.length; i++) d.paths[i].setAttribute('d', '');
+        const nodes = d.marks.childNodes;
+        for (let i = 0; i < nodes.length; i++) nodes[i].setAttribute('visibility', 'hidden');
+    }
+
+    function clear() {
+        target = null;
+        cache = null;
+        dirty = false;
+        lastCam = null;
+        applyHidden();
+    }
+
+    function invalidate() {
+        dirty = true;
+    }
+
+    // Le type d'un objet se lit sur `jsonData.types` (tableau dont le premier
+    // élément est le code court : "Pla", "Moo", "Sun", "Sat"…). PAS via
+    // `getInfo('type', obs)`, qui renvoie `undefined` — vérifié au spike, cf.
+    // §0 de la spec. C'est aussi pour ça que la détection de constellation
+    // reste basée sur les désignations ("CON western UMa").
+    function objectTypes(obj) {
+        try {
+            const d = obj.jsonData;
+            return (d && Array.isArray(d.types)) ? d.types : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // Une constellation n'a pas de position ponctuelle, un satellite boucle en
+    // ~90 min : ni l'un ni l'autre n'a de course lisible sur 12 h.
+    function isExcluded(designations, types) {
+        for (let i = 0; i < types.length; i++) {
+            if (types[i] === 'Sat' || types[i] === 'Con') return true;
+        }
+        for (let i = 0; i < designations.length; i++) {
+            if (designations[i].indexOf('CON ') === 0) return true;
+        }
+        return false;
+    }
+
+    function setTarget(obj, observer, nowMs) {
+        if (!enabled) return;
+        if (!obj || !observer || typeof observer.clone !== 'function') {
+            // Moteur sans clone() : on ne peut rien calculer, on se désactive
+            // pour la session plutôt que de réessayer 60 fois par seconde.
+            enabled = false;
+            clear();
+            return;
+        }
+        let designations = [];
+        try { designations = obj.designations() || []; } catch (e) { designations = []; }
+        if (isExcluded(designations, objectTypes(obj))) { clear(); return; }
+
+        target = { designations: designations };
+        cache = null;
+        dirty = false;
+        lastCam = null;
+        recompute(nowMs);
+    }
+
+    function recompute(nowMs) {
+        // Toujours marquer le cache comme calculé, même en échec : sinon
+        // `render` relancerait 85 requêtes moteur à chaque frame.
+        cache = { samples: [], computedAtMs: nowMs };
+
+        // NB : `globalThis.stel` est TOUJOURS `undefined` ici — `app.js`
+        // déclare `let stel` au top-level d'un script classique, ce qui crée
+        // une liaison de l'environnement lexical global, PAS une propriété de
+        // l'objet global (vérifié en direct dans le navigateur, avec le moteur
+        // chargé : `globalThis.stel` → undefined, `window.stel` → undefined,
+        // alors que l'identifiant nu `stel` résout bien vers le moteur). Les
+        // scripts classiques d'une même page partagent un seul environnement
+        // lexical global, donc l'identifiant nu `stel` référencé ICI, dans un
+        // corps de fonction appelé après le chargement de app.js, retrouve la
+        // même liaison. `typeof stel` évite un ReferenceError si l'identifiant
+        // n'existe nulle part (cas Node, où le module doit rester
+        // require()-able).
+        const engine = typeof stel !== 'undefined' ? stel : undefined;
+        if (!engine || !target) return;
+        const sel = engine.core.selection;
+        if (!sel) { target = null; return; }
+
+        // On ne garde pas de référence longue sur le SweObj sélectionné : sa
+        // durée de vie n'est pas garantie au-delà de la sélection courante. On
+        // relit la sélection et on vérifie que c'est toujours la même cible.
+        let selDesignations = [];
+        try { selDesignations = sel.designations() || []; } catch (e) { selDesignations = []; }
+        if (!selDesignations.length || !target.designations.length
+            || selDesignations[0] !== target.designations[0]) {
+            target = null;
+            return;
+        }
+
+        const res = sampleTrail(sel, engine.core.observer, nowMs, engine);
+        cache.samples = res.samples;
+    }
+
+    function camUnchanged(cam) {
+        if (!lastCam) return false;
+        const EPS = 0.001;   // même seuil que CAM_STILL_EPS dans app.js
+        // `anpm` vient de skyProjection.js, chargé AVANT ce fichier dans
+        // index.html — d'où l'accès qualifié plutôt qu'un identifiant local.
+        const anpm = SkyProjection.anpm;
+        return Math.abs(anpm(cam.yaw - lastCam.yaw)) < EPS
+            && Math.abs(cam.pitch - lastCam.pitch) < EPS
+            && Math.abs(anpm((cam.roll || 0) - lastCam.roll)) < EPS
+            && Math.abs(cam.fov - lastCam.fov) < EPS
+            && cam.w === lastCam.w && cam.h === lastCam.h;
+    }
+
+    function render(cam, nowMs) {
+        if (!enabled) return;
+        if (!target) { applyHidden(); return; }
+
+        const stale = dirty || !cache
+            || nowMs - cache.computedAtMs > RECOMPUTE_DRIFT_MS
+            || nowMs < cache.computedAtMs;
+        if (stale) {
+            dirty = false;
+            recompute(nowMs);
+            lastCam = null;              // force le redessin
+        } else if (camUnchanged(cam)) {
+            return;
+        }
+        if (!target || !cache || cache.samples.length < 2) { applyHidden(); return; }
+
+        lastCam = { yaw: cam.yaw, pitch: cam.pitch, roll: cam.roll || 0, fov: cam.fov, w: cam.w, h: cam.h };
+
+        const ahead = [];
+        for (let i = 0; i < cache.samples.length; i++) {
+            if (cache.samples[i].tMs >= nowMs) ahead.push(cache.samples[i]);
+        }
+        if (ahead.length < 2) { applyHidden(); return; }
+
+        const projected = [];
+        for (let i = 0; i < ahead.length; i++) {
+            const s = ahead[i];
+            const p = SkyProjection.projectAzAlt(s.az, s.alt, cam);
+            projected.push({
+                tMs: s.tMs,
+                isHour: s.isHour,
+                kind: s.kind,
+                px: p.px,
+                py: p.py,
+                // Les points de lever/coucher retombent à alt ≈ 0 : une
+                // comparaison stricte à 0 les rendrait invisibles.
+                visible: !p.behind && s.alt >= -1e-3,
+            });
+        }
+
+        const d = ensureDom();
+        if (!d) return;
+
+        const bounds = {
+            minX: -2 * cam.w, maxX: 3 * cam.w,
+            minY: -2 * cam.h, maxY: 3 * cam.h,
+        };
+        const firstMs = projected[0].tMs;
+        const spanMs = projected[projected.length - 1].tMs - firstMs;
+        for (let b = 0; b < BUCKETS; b++) {
+            let slice;
+            if (spanMs <= 0) {
+                slice = b === 0 ? projected : [];
+            } else {
+                const t0 = firstMs + (spanMs * b) / BUCKETS;
+                const t1 = firstMs + (spanMs * (b + 1)) / BUCKETS;
+                slice = [];
+                for (let i = 0; i < projected.length; i++) {
+                    // Bornes inclusives des deux côtés : le point de jointure
+                    // appartient aux deux tranches, sinon un segment manquerait
+                    // à chaque raccord.
+                    if (projected[i].tMs >= t0 && projected[i].tMs <= t1) slice.push(projected[i]);
+                }
+            }
+            d.paths[b].setAttribute('d', slice.length >= 2 ? buildPathData(slice, bounds) : '');
+        }
+
+        const marks = [];
+        for (let i = 0; i < projected.length; i++) {
+            const p = projected[i];
+            if (!p.isHour && !p.kind) continue;
+            if (!p.visible) continue;
+            if (p.px < -MARK_MARGIN_PX || p.px > cam.w + MARK_MARGIN_PX) continue;
+            if (p.py < -MARK_MARGIN_PX || p.py > cam.h + MARK_MARGIN_PX) continue;
+            marks.push(p);
+        }
+        renderMarks(d, marks, declutterLabels(marks, LABEL_MIN_DIST_PX));
+    }
+
+    function markText(m) {
+        if (m.kind === 'set') return 'coucher ' + formatExactTime(m.tMs);
+        if (m.kind === 'rise') return 'lever ' + formatExactTime(m.tMs);
+        return formatHourLabel(m.tMs);
+    }
+
+    // Pool de noeuds : un <circle> + un <text> par repère, réutilisés d une
+    // frame à l autre. Le pool ne rétrécit jamais — il est borné à ~14 repères.
+    function renderMarks(d, marks, labelled) {
+        while (d.marks.childNodes.length < marks.length * 2) {
+            const c = document.createElementNS(SVG_NS, 'circle');
+            c.setAttribute('class', 'sky-trail-dot');
+            const t = document.createElementNS(SVG_NS, 'text');
+            t.setAttribute('class', 'sky-trail-text');
+            d.marks.appendChild(c);
+            d.marks.appendChild(t);
+        }
+        const nodes = d.marks.childNodes;
+        const count = nodes.length / 2;
+        for (let i = 0; i < count; i++) {
+            const c = nodes[i * 2];
+            const t = nodes[i * 2 + 1];
+            const m = marks[i];
+            if (!m) {
+                c.setAttribute('visibility', 'hidden');
+                t.setAttribute('visibility', 'hidden');
+                continue;
+            }
+            c.setAttribute('cx', m.px.toFixed(1));
+            c.setAttribute('cy', m.py.toFixed(1));
+            c.setAttribute('r', m.kind ? '5' : '3');
+            c.setAttribute('visibility', 'visible');
+            if (labelled.indexOf(m) !== -1) {
+                t.setAttribute('x', (m.px + 8).toFixed(1));
+                t.setAttribute('y', (m.py - 6).toFixed(1));
+                t.textContent = markText(m);
+                t.setAttribute('visibility', 'visible');
+            } else {
+                t.setAttribute('visibility', 'hidden');
+            }
+        }
+    }
+
     const api = {
         buildSampleTimes: buildSampleTimes,
         formatHourLabel: formatHourLabel,
@@ -257,6 +529,10 @@
         buildPathData: buildPathData,
         declutterLabels: declutterLabels,
         sampleTrail: sampleTrail,
+        setTarget: setTarget,
+        invalidate: invalidate,
+        clear: clear,
+        render: render,
     };
     global.SkyTrail = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
