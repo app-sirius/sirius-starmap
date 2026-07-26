@@ -209,13 +209,13 @@ test('margin élargit la zone considérée comme à l écran', () => {
 
 - [ ] **Step 2: Ajouter le script de test et lancer pour voir échouer**
 
-Dans `stellarium/package.json`, ajouter la ligne `test` dans `scripts` :
+Dans `stellarium/package.json`, ajouter la ligne `test` dans `scripts`. **`node --test` nu, sans argument** : sur Node 24, `node --test test/` traite le répertoire comme module principal et échoue (`Cannot find module`). L'auto-découverte trouve `test/*.test.js` toute seule et marche sur toutes les versions.
 
 ```json
   "scripts": {
     "serve": "node server.js",
     "serve:python": "python server.py",
-    "test": "node --test test/"
+    "test": "node --test"
   },
 ```
 
