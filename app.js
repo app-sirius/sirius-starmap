@@ -452,7 +452,7 @@ async function initStellarium() {
                 e.stopPropagation();
                 e.preventDefault();
                 stel.core.selection = null;
-                try { stel.pointAndLock(null); } catch (err) {}
+                releaseCameraLock();
                 // Le listener change('selection') remet trackedTarget/
                 // selectedDesignations à null ; on masque tout de suite.
                 trackedTarget = null;
@@ -720,6 +720,26 @@ let pendingObserverOrientation = null;
 // `setTime` met à jour cet offset pour figer un instant tout en continuant
 // à avancer en temps réel depuis ce point.
 let timeOffsetMs = 0;
+
+/**
+ * Libère le verrou caméra posé par pointAt() (le moteur recentre sur l'astre à
+ * chaque frame tant qu'il tient).
+ *
+ * ATTENTION au `0`, il n'est pas cosmétique. L'attribut `lock` n'accepte QUE
+ * `0` (ou `''`) pour repasser à vide : `null`, `undefined`, `false` et `NaN`
+ * sont acceptés sans lever quoi que ce soit et ne font RIEN. Et
+ * `stel.pointAndLock(null)` — la forme qu'on utilisait avant — ne marche pas
+ * davantage : le wrapper du moteur fait `Module._core_point_and_lock(target.v)`
+ * et lève donc une TypeError sur null, historiquement avalée par un try/catch.
+ * Comportement vérifié dans la console du moteur (2026-07-26).
+ *
+ * La sélection est volontairement conservée : trackedTarget reste posé, donc la
+ * flèche continue de guider vers l'astre — même contrat que guideTo().
+ */
+function releaseCameraLock() {
+    if (!stel || !stel.core) return;
+    try { stel.core.lock = 0; } catch (e) {}
+}
 
 function pointAt(name, fovDeg = 30) {
     if (!stel) return;
@@ -1266,12 +1286,7 @@ function handleMessage(data) {
                     // gyro sont exclusifs : le verrou recentre sur l'astre à
                     // chaque frame pendant que le gyro y écrit l'orientation du
                     // téléphone — les deux se battent et la vue devient folle.
-                    // La sélection, elle, est conservée : trackedTarget reste
-                    // posé, donc la flèche guide vers l'astre. C'est exactement
-                    // ce que fait guideTo (sélection sans verrou, cf. plus haut).
-                    if (typeof stel.pointAndLock === 'function') {
-                        try { stel.pointAndLock(null); } catch (e) {}
-                    }
+                    releaseCameraLock();
                     // À l'activation, on cale le FOV sur la vision humaine :
                     // c'est le dézoom maximum (le plafonnement continu est
                     // appliqué dans updateOverlay). En AR cependant, le FOV doit
@@ -1280,9 +1295,7 @@ function handleMessage(data) {
                     // levée — ferait resurgir la parallaxe).
                     stel.core.fov = arMode && arFovRad ? arFovRad : EYE_VISION_FOV_RAD;
                 } else {
-                    if (typeof stel.pointAndLock === 'function') {
-                        try { stel.pointAndLock(null); } catch (e) {}
-                    }
+                    releaseCameraLock();
                     // Sortie du gyro : le téléphone était sans doute incliné, ce
                     // qui a laissé un roll non nul sur l'observateur → horizon
                     // penché. En mode manuel on veut un horizon de niveau, donc
