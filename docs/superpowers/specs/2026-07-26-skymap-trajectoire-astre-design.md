@@ -155,10 +155,16 @@ caméra : calculé une fois, reprojeté à chaque frame. Recalcul complet sur :
 - nouvelle sélection,
 - changement de `timeOffsetMs` (curseur temps, mode simulation),
 - changement de position observateur (message `location`),
-- dérive du temps affiché de plus de 10 min depuis le dernier calcul, ou saut en arrière.
+- dérive du temps affiché de plus de **60 s** depuis le dernier calcul, ou saut en arrière.
 
 Entre deux recalculs on se contente de rogner la tête du tracé au fil du temps : les instants
 échantillonnés sont absolus, leurs coordonnées ne bougent pas.
+
+**Pourquoi 60 s et non le pas d'échantillonnage.** Rogner ne peut retirer que des points
+entiers : avec un seuil de recalcul égal au pas de 10 min, la tête du tracé se détacherait de
+l'astre jusqu'à 10 min de mouvement apparent, soit 2,5° de ciel — un décrochage bien visible.
+À 60 s l'écart plafonne à 0,25°, imperceptible, pour un coût moyen de 85 requêtes moteur par
+minute (~1,4/s), négligeable devant ce que fait déjà l'overlay à chaque frame.
 
 **Exclusions** — `obj.getInfo('type', obs)` valant `Sat`, ou une sélection reconnue comme
 constellation (même logique que le listener existant, l. 410-412) ⇒ `SkyTrail.clear()`
