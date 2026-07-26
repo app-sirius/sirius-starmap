@@ -1262,6 +1262,16 @@ function handleMessage(data) {
                     // Reprise du gyro : on coupe tout élan d'inertie en cours.
                     inertiaActive = false;
                     inertiaDragging = false;
+                    // ...et tout verrou caméra posé par pointAt(). Verrou et
+                    // gyro sont exclusifs : le verrou recentre sur l'astre à
+                    // chaque frame pendant que le gyro y écrit l'orientation du
+                    // téléphone — les deux se battent et la vue devient folle.
+                    // La sélection, elle, est conservée : trackedTarget reste
+                    // posé, donc la flèche guide vers l'astre. C'est exactement
+                    // ce que fait guideTo (sélection sans verrou, cf. plus haut).
+                    if (typeof stel.pointAndLock === 'function') {
+                        try { stel.pointAndLock(null); } catch (e) {}
+                    }
                     // À l'activation, on cale le FOV sur la vision humaine :
                     // c'est le dézoom maximum (le plafonnement continu est
                     // appliqué dans updateOverlay). En AR cependant, le FOV doit
