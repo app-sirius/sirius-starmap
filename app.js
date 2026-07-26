@@ -378,6 +378,16 @@ async function initStellarium() {
         // natif (qui ouvre la fiche de l'objet).
         stel.core.change('selection', () => {
             const sel = stel.core.selection;
+            // Avant le court-circuit `suppressSelectionEvent` plus bas : le
+            // tracé doit aussi apparaître sur un « Pointer » programmatique,
+            // pas seulement sur un tap.
+            if (!sel) {
+                safeTrail(function () { SkyTrail.clear(); });
+            } else {
+                safeTrail(function () {
+                    SkyTrail.setTarget(sel, stel.core.observer, displayedNowMs());
+                });
+            }
             if (!sel) {
                 // Désélection (tap dans le vide / sélection externe coupée) :
                 // on arrête de guider/suivre la cible précédente.
@@ -451,7 +461,10 @@ async function initStellarium() {
             deselectBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                stel.core.selection = null;
+                // `= null` ne désélectionne PAS : le moteur rend toujours l'objet
+                // précédent à la lecture suivante. Il faut l'entier 0 — même
+                // piège que `stel.core.lock = 0` dans releaseCameraLock().
+                stel.core.selection = 0;
                 releaseCameraLock();
                 // Le listener change('selection') remet trackedTarget/
                 // selectedDesignations à null ; on masque tout de suite.
@@ -721,6 +734,48 @@ let pendingObserverOrientation = null;
 // à avancer en temps réel depuis ce point.
 let timeOffsetMs = 0;
 
+// Instant que la carte AFFICHE, par opposition à l'heure système : c'est cette
+// expression qui pilote `observer.utc` à chaque frame, et c'est donc d'elle que
+// le tracé de course doit partir (y compris quand l'utilisateur est en
+// simulation via le curseur temps ou le bouton « Simuler » des éclipses).
+function displayedNowMs() {
+    return Date.now() + timeOffsetMs;
+}
+
+// `updateOverlay` n'a aucun try/catch : une exception y tuerait la boucle
+// requestAnimationFrame et figerait d'un coup la flèche, la boussole et les
+// labels d'étoiles. Le tracé de course, qui est du confort, ne doit jamais
+// pouvoir provoquer ça — on l'isole et on le coupe au premier échec.
+//
+// La coupure est TEMPORAIRE, pas définitive. Toutes les erreurs plausibles ici
+// sont passagères : une secousse du moteur WASM, ou un catalogue en cours de
+// rechargement après un changement de position. Un verrou permanent priverait
+// l'utilisateur du tracé jusqu'au redémarrage de l'app, sans rien afficher —
+// et comme le reste de la carte continue de fonctionner, rien n'aurait l'air
+// cassé. On réessaie donc après un délai : une erreur passagère se répare
+// toute seule, une erreur permanente ne coûte qu'un recalcul par demi-minute.
+const SKY_TRAIL_RETRY_MS = 30000;
+let skyTrailFailedAt = 0;   // 0 = pas en échec
+function safeTrail(fn) {
+    if (typeof SkyTrail === 'undefined') return;
+    if (skyTrailFailedAt) {
+        if (Date.now() - skyTrailFailedAt < SKY_TRAIL_RETRY_MS) return;
+        skyTrailFailedAt = 0;   // fin du délai : on retente
+    }
+    try {
+        fn();
+    } catch (e) {
+        // Un log par coupure, pas par frame : sans ce garde-fou, une erreur
+        // dans `render` produirait 60 lignes de console par seconde.
+        skyTrailFailedAt = Date.now();
+        console.error(
+            '[stellarium] tracé de course coupé après erreur, nouvel essai dans '
+            + (SKY_TRAIL_RETRY_MS / 1000) + ' s', e
+        );
+        try { SkyTrail.clear(); } catch (e2) {}
+    }
+}
+
 /**
  * Libère le verrou caméra posé par pointAt() (le moteur recentre sur l'astre à
  * chaque frame tant qu'il tient).
@@ -841,7 +896,7 @@ function stepInertia(now) {
 
 function updateOverlay() {
     if (stel) {
-        stel.core.observer.utc = (Date.now() + timeOffsetMs) / 86400000 + 40587;
+        stel.core.observer.utc = displayedNowMs() / 86400000 + 40587;
         // Applique l'orientation gyro en attente, une seule fois par frame et
         // synchronisée au rendu (cf. pendingObserverOrientation + case
         // 'observerOrientation'). On vide après application : au repos (aucun
@@ -872,6 +927,16 @@ function updateOverlay() {
         }
         updateArrow();
         updateCompass();
+        safeTrail(function () {
+            SkyTrail.render({
+                yaw: stel.core.observer.yaw,
+                pitch: stel.core.observer.pitch,
+                roll: stel.core.observer.roll || 0,
+                fov: stel.core.fov,
+                w: window.innerWidth,
+                h: window.innerHeight,
+            }, displayedNowMs());
+        });
         updateStarLabels();
     }
     requestAnimationFrame(updateOverlay);
@@ -893,15 +958,20 @@ function buildStarLabels() {
     }
 }
 
-// Projection stéréographique caméra→écran (celle qu'utilise Stellarium
-// Web par défaut). On calcule (sx, sy, cosA) = vecteur unitaire vers
-// l'astre exprimé dans la base caméra (right, up, forward), puis on
-// applique la projection stéréographique depuis l'antipode du forward.
-// Le focal est calé sur le plus petit côté de l'écran (convention engine
-// pour `core.fov`). Label masqué si sous l'horizon, derrière la caméra,
-// ou hors écran.
+// Positionne les labels HTML des étoiles brillantes (BRIGHT_STARS) au-dessus
+// de leur astre à l'écran, une fois par frame. Résout paresseusement chaque
+// objet moteur, court-circuite si la caméra n'a pas bougé ou si l'étoile est
+// sous l'horizon/masquée par le moteur (sélection), puis délègue la
+// projection caméra→écran à `SkyProjection.projectAzAlt` (skyProjection.js).
+// Label masqué si sous l'horizon, derrière la caméra, ou hors écran.
 function updateStarLabels() {
     if (!stel || !starLabels.length) return;
+    // Tourne dans updateOverlay(), qui n'a aucun try/catch : si skyProjection.js
+    // n'a pas chargé (script manquant/réseau flaky), SkyProjection est
+    // undefined et l'appeler plus bas planterait toute la boucle de rendu
+    // (flèche, boussole, labels, horloge). On dégrade silencieusement au
+    // lieu de figer la carte.
+    if (typeof SkyProjection === 'undefined') return;
 
     // Note: pas de throttle temporel ici. Le moteur dessine les étoiles à
     // 60 fps ; capper nos labels HTML plus bas crée un décalage visible
@@ -964,13 +1034,11 @@ function updateStarLabels() {
     lastStarLabelsCamRoll = camRoll;
     lastStarLabelsFov = fov;
 
-    const cosRoll = Math.cos(camRoll);
-    const sinRoll = Math.sin(camRoll);
-    const halfFov = fov / 2;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const focal = (Math.min(w, h) / 2) / (2 * Math.tan(halfFov / 2));
-    const margin = 40;
+    const cam = {
+        yaw: camAz, pitch: camAlt, roll: camRoll, fov: fov,
+        w: window.innerWidth, h: window.innerHeight,
+        margin: 40,   // tolérance de débord avant de masquer le label
+    };
 
     for (const sl of starLabels) {
         if (!sl.obj) {
@@ -1011,6 +1079,9 @@ function updateStarLabels() {
         const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);
         const [objAz, objAlt] = stel.c2s(pObs);
 
+        // Court-circuit avant projection : à tout instant la moitié du
+        // catalogue est sous l'horizon, autant ne pas la projeter. Le test est
+        // redondant avec `proj.belowHorizon`, mais il évite le calcul.
         if (objAlt <= 0) {
             if (sl._visible !== false) {
                 sl.el.classList.remove('visible');
@@ -1019,36 +1090,10 @@ function updateStarLabels() {
             continue;
         }
 
-        const dAz = stel.anpm(objAz - camAz);
-        const cosA = Math.sin(camAlt) * Math.sin(objAlt)
-                   + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
-        // cosA = -1 (astre derrière, antipode) → singularité de la projection
-        if (cosA <= -0.999) {
-            if (sl._visible !== false) {
-                sl.el.classList.remove('visible');
-                sl._visible = false;
-            }
-            continue;
-        }
-
-        const sx = Math.sin(dAz) * Math.cos(objAlt);
-        const sy = Math.sin(objAlt) * Math.cos(camAlt)
-                 - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
-
-        // Compense le roll caméra : sans ça, les labels HTML restent
-        // alignés à l'écran tandis que le canvas WebGL tourne avec
-        // l'inclinaison du téléphone → décalage visible. Le sens de la
-        // rotation est l'inverse de la rotation appliquée par le moteur
-        // au canvas : ses étoiles tournent dans un sens, nos labels les
-        // suivent dans l'autre repère écran.
-        const sxr =  cosRoll * sx - sinRoll * sy;
-        const syr =  sinRoll * sx + cosRoll * sy;
-
-        const k = 2 / (1 + cosA);
-        const px = w / 2 + sxr * k * focal;
-        const py = h / 2 - syr * k * focal;
-
-        if (px < -margin || px > w + margin || py < -margin || py > h + margin) {
+        // `onScreen` intègre la marge portée par `cam` : un seul endroit décide
+        // du hors-champ, ici comme pour la flèche et le tracé de course.
+        const proj = SkyProjection.projectAzAlt(objAz, objAlt, cam);
+        if (proj.behind || !proj.onScreen) {
             if (sl._visible !== false) {
                 sl.el.classList.remove('visible');
                 sl._visible = false;
@@ -1057,7 +1102,7 @@ function updateStarLabels() {
         }
 
         // -50%, -180% replaces the static CSS transform we removed.
-        sl.el.style.transform = `translate3d(${px}px, ${py}px, 0) translate(-50%, -180%)`;
+        sl.el.style.transform = `translate3d(${proj.px}px, ${proj.py}px, 0) translate(-50%, -180%)`;
         if (sl._visible !== true) {
             sl.el.classList.add('visible');
             sl._visible = true;
@@ -1132,6 +1177,15 @@ function updateCompass() {
 function updateArrow() {
     const arrowEl = document.getElementById('arrow');
     const labelEl = document.getElementById('arrow-label');
+    // Tourne dans updateOverlay(), qui n'a aucun try/catch : si skyProjection.js
+    // n'a pas chargé, SkyProjection est undefined et l'appel plus bas
+    // planterait toute la boucle de rendu. On dégrade en masquant la flèche
+    // au lieu de la laisser bloquée visible, plutôt que de figer la carte.
+    if (typeof SkyProjection === 'undefined') {
+        arrowEl.classList.remove('visible');
+        labelEl.classList.remove('visible');
+        return;
+    }
     if (!trackedTarget) {
         arrowEl.classList.remove('visible');
         labelEl.classList.remove('visible');
@@ -1151,7 +1205,6 @@ function updateArrow() {
     const camAlt = obs.pitch;
     const camRoll = obs.roll || 0;
     const dAz = stel.anpm(objAz - camAz);
-    const dAlt = objAlt - camAlt;
 
     const cosA = Math.sin(camAlt) * Math.sin(objAlt)
                + Math.cos(camAlt) * Math.cos(objAlt) * Math.cos(dAz);
@@ -1164,14 +1217,19 @@ function updateArrow() {
         arrowEl.classList.remove('visible');
         labelEl.classList.remove('visible');
     } else {
-        const sx = Math.sin(dAz) * Math.cos(objAlt);
-        const sy = Math.sin(objAlt) * Math.cos(camAlt)
-                 - Math.cos(objAlt) * Math.sin(camAlt) * Math.cos(dAz);
-        // Compense le roll caméra (cf. updateStarLabels).
-        const cosRoll = Math.cos(camRoll), sinRoll = Math.sin(camRoll);
-        const sxr =  cosRoll * sx - sinRoll * sy;
-        const syr =  sinRoll * sx + cosRoll * sy;
-        const screenAngle = Math.atan2(-syr, sxr);
+        const proj = SkyProjection.projectAzAlt(objAz, objAlt, {
+            yaw: camAz, pitch: camAlt, roll: camRoll,
+            fov: stel.core.fov, w: window.innerWidth, h: window.innerHeight,
+        });
+        // On ne se sert que de la direction écran : la flèche est ancrée au
+        // centre et pivote vers l'astre hors champ. On utilise `sxr`/`syr`
+        // (toujours finis) plutôt que `px`/`py` : `px`/`py` valent NaN quand
+        // la cible est derrière la caméra (`proj.behind`), ce qui est
+        // justement le cas courant pour cette flèche — l'objet suivi est
+        // très souvent hors champ, parfois à l'opposé du regard. La
+        // direction reste bien définie à l'antipode, seule l'échelle
+        // stéréographique diverge, donc pas besoin de garder `px`/`py` ici.
+        const screenAngle = Math.atan2(-proj.syr, proj.sxr);
 
         arrowEl.style.left = '50%';
         arrowEl.style.top = '50%';
@@ -1215,8 +1273,10 @@ function handleMessage(data) {
                         stel.core.observer.update();
                     }
                 }
+                // La course dépend de la position de l'observateur.
+                safeTrail(function () { SkyTrail.invalidate(); });
                 break;
-                
+
             case 'lookAt':
                 if (message.target) {
                     if (gyroMode) {
@@ -1237,8 +1297,10 @@ function handleMessage(data) {
                 } else {
                     timeOffsetMs = 0;
                 }
+                // La course part du temps affiché, qui vient de changer.
+                safeTrail(function () { SkyTrail.invalidate(); });
                 break;
-                
+
             case 'toggleLayer':
                 if (message.layer) {
                     const layer = stel.core[message.layer];

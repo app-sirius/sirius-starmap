@@ -240,6 +240,38 @@
             text-shadow: 0 0 8px rgba(0, 0, 0, 0.95);
         }
 
+        /* Tracé de la course d un astre. Entre le canvas WebGL (z-1) et les
+           labels d étoiles (z-3). overflow visible : un sous-chemin peut
+           légitimement déborder de la boîte SVG avant d être écarté. */
+        #sky-trail {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            pointer-events: none; z-index: 2;
+            overflow: visible;
+        }
+        .sky-trail-seg {
+            fill: none;
+            stroke: #FD013A;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .sky-trail-dot { fill: #FD013A; }
+        .sky-trail-text {
+            font-family: 'Satoshi', sans-serif;
+            font-weight: 700;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            fill: rgba(255, 255, 255, 0.9);
+            /* Contour noir peint SOUS le remplissage : même lisibilité que le
+               text-shadow des .star-label, mais en SVG. */
+            paint-order: stroke;
+            stroke: rgba(0, 0, 0, 0.85);
+            stroke-width: 3;
+            stroke-linejoin: round;
+        }
+
         #star-labels {
             position: absolute; inset: 0;
             pointer-events: none; z-index: 3;
@@ -296,8 +328,21 @@
         <div id="compass-track"></div>
         <div id="compass-readout">000°</div>
     </div>
+    <!-- Quatre segments d opacité décroissante plutôt qu un dégradé : un
+         linearGradient SVG s oriente dans l espace écran, pas le long de la
+         courbe, donc il ne suivrait pas l axe du temps dès que le tracé
+         s incurve. -->
+    <svg id="sky-trail" aria-hidden="true">
+        <path class="sky-trail-seg" stroke-opacity="0.9"></path>
+        <path class="sky-trail-seg" stroke-opacity="0.7"></path>
+        <path class="sky-trail-seg" stroke-opacity="0.5"></path>
+        <path class="sky-trail-seg" stroke-opacity="0.3"></path>
+        <g id="sky-trail-marks"></g>
+    </svg>
     <div id="star-labels"></div>
     <script src="stellarium-web-engine.js"></script>
+    <script src="skyProjection.js"></script>
+    <script src="skyTrail.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
