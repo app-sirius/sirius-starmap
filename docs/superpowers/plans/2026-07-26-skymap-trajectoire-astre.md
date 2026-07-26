@@ -358,12 +358,15 @@ par :
 
 - [ ] **Step 2: Réécrire le corps de boucle de `updateStarLabels`**
 
-Dans `stellarium/app.js`, remplacer le bloc allant de `const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);` (l. 1011) jusqu'à la ligne `if (px < -margin || px > w + margin || py < -margin || py > h + margin) {` **exclue** (l. 1051), par :
+Dans `stellarium/app.js`, remplacer le bloc allant de `const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);` (l. 1011) jusqu'à la ligne `sl.el.style.transform = …` (l. 1060) **incluse**, par :
 
 ```js
         const pObs = stel.convertFrame(obs, 'ICRF', 'OBSERVED', sl.pIcrf);
         const [objAz, objAlt] = stel.c2s(pObs);
 
+        // Court-circuit avant projection : à tout instant la moitié du
+        // catalogue est sous l'horizon, autant ne pas la projeter. Le test est
+        // redondant avec `proj.belowHorizon`, mais il évite le calcul.
         if (objAlt <= 0) {
             if (sl._visible !== false) {
                 sl.el.classList.remove('visible');
@@ -372,17 +375,22 @@ Dans `stellarium/app.js`, remplacer le bloc allant de `const pObs = stel.convert
             continue;
         }
 
+        // `onScreen` intègre la marge portée par `cam` : un seul endroit décide
+        // du hors-champ, ici comme pour la flèche et le tracé de course.
         const proj = SkyProjection.projectAzAlt(objAz, objAlt, cam);
-        if (proj.behind) {
+        if (proj.behind || !proj.onScreen) {
             if (sl._visible !== false) {
                 sl.el.classList.remove('visible');
                 sl._visible = false;
             }
             continue;
         }
-        const px = proj.px;
-        const py = proj.py;
+
+        // -50%, -180% replaces the static CSS transform we removed.
+        sl.el.style.transform = `translate3d(${proj.px}px, ${proj.py}px, 0) translate(-50%, -180%)`;
 ```
+
+L'ancien test `if (px < -margin || px > w + margin || …)` et son bloc de masquage (l. 1051-1057) disparaissent : `proj.onScreen` calcule exactement la même chose. Sans ça, deux endroits décideraient du hors-champ.
 
 Puis, plus haut dans la fonction, remplacer le bloc de calcul devenu inutile (l. 967-973) :
 
@@ -399,13 +407,20 @@ Puis, plus haut dans la fonction, remplacer le bloc de calcul devenu inutile (l.
 par :
 
 ```js
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const margin = 40;
-    const cam = { yaw: camAz, pitch: camAlt, roll: camRoll, fov: fov, w: w, h: h, margin: margin };
+    const cam = {
+        yaw: camAz, pitch: camAlt, roll: camRoll, fov: fov,
+        w: window.innerWidth, h: window.innerHeight,
+        margin: 40,   // tolérance de débord avant de masquer le label
+    };
 ```
 
-Le test `if (px < -margin || …)` qui suit reste inchangé : il fait exactement ce que `proj.onScreen` calcule, on le laisse tel quel pour que le refactor reste minimal et évident à relire.
+Vérifier après coup qu'aucune autre ligne de `updateStarLabels` n'utilise encore `w`, `h`, `margin`, `focal`, `halfFov`, `cosRoll` ou `sinRoll` :
+
+```bash
+cd stellarium && awk 'NR>=903 && NR<=1060' app.js | grep -n "halfFov\|cosRoll\|sinRoll\|focal\|\bmargin\b\|\bw\b\|\bh\b"
+```
+
+Attendu : seules les occurrences à l'intérieur du littéral `cam`.
 
 - [ ] **Step 3: Réécrire `updateArrow`**
 
@@ -418,12 +433,14 @@ Dans `stellarium/app.js`, remplacer le bloc `else { … }` de `updateArrow` (l. 
             fov: stel.core.fov, w: window.innerWidth, h: window.innerHeight,
         });
         // On ne se sert que de la direction écran : la flèche est ancrée au
-        // centre et pivote vers l'astre hors champ. atan2 sur le vecteur
-        // (px, py) rapporté au centre donne le même angle que l'ancien calcul
-        // sur (sxr, syr), au signe de l'axe Y près — d'où le -(py - h/2).
-        const vx = proj.px - window.innerWidth / 2;
-        const vy = -(proj.py - window.innerHeight / 2);
-        const screenAngle = Math.atan2(-vy, vx);
+        // centre et pivote vers l'astre hors champ. Le vecteur centre→astre
+        // donne exactement l'ancien angle : px - w/2 = sxr·k·focal et
+        // py - h/2 = -syr·k·focal, avec k·focal > 0, donc
+        // atan2(py - h/2, px - w/2) = atan2(-syr, sxr).
+        const screenAngle = Math.atan2(
+            proj.py - window.innerHeight / 2,
+            proj.px - window.innerWidth / 2
+        );
 
         arrowEl.style.left = '50%';
         arrowEl.style.top = '50%';
