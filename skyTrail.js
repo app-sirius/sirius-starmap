@@ -269,6 +269,8 @@
     let dirty = false;
     let dom = null;
     let lastCam = null;
+    let hidden = true;          // la couche est déjà vide/masquée (cf. applyHidden)
+    let noCloneWarned = false;  // console.warn émis au plus une fois (cf. setTarget)
 
     function ensureDom() {
         if (dom) return dom;
@@ -283,12 +285,20 @@
         return dom;
     }
 
+    // Idempotent : n'écrit dans le DOM que la première fois qu'on devient vide,
+    // pas à chaque frame tant qu'on reste dans cet état (le cas le plus
+    // fréquent — aucune cible sélectionnée — tournerait sinon à 60fps pour
+    // rien). `render` et `setTarget`/`clear` remettent `hidden` à jour de
+    // façon cohérente, un rendu réussi le repasse à `false` : la couche peut
+    // donc toujours réapparaître au prochain appel utile.
     function applyHidden() {
+        if (hidden) return;
         const d = ensureDom();
         if (!d) return;
         for (let i = 0; i < d.paths.length; i++) d.paths[i].setAttribute('d', '');
         const nodes = d.marks.childNodes;
         for (let i = 0; i < nodes.length; i++) nodes[i].setAttribute('visibility', 'hidden');
+        hidden = true;
     }
 
     function clear() {
@@ -331,9 +341,28 @@
 
     function setTarget(obj, observer, nowMs) {
         if (!enabled) return;
-        if (!obj || !observer || typeof observer.clone !== 'function') {
-            // Moteur sans clone() : on ne peut rien calculer, on se désactive
-            // pour la session plutôt que de réessayer 60 fois par seconde.
+        // Deux échecs de nature très différente, à NE PAS regrouper malgré la
+        // tentation de « simplifier » :
+        //  - `obj`/`observer` absent : un appel ordinaire et transitoire (ex.
+        //    au tout début, avant que `stel.core.observer` existe). Rien
+        //    n'indique que l'environnement est incapable — un prochain appel
+        //    avec de bons arguments doit fonctionner normalement. On efface
+        //    juste l'état courant, `enabled` n'est pas touché.
+        //  - `observer` présent mais SANS `clone()` : ça, c'est une incapacité
+        //    durable du moteur lui-même, pas un mauvais appel ponctuel — aucun
+        //    argument futur n'y changera rien. Là seulement on latche la
+        //    fonctionnalité éteinte pour le reste de la session (sinon on
+        //    retenterait 60 fois par seconde en pure perte), et on prévient
+        //    une seule fois en console pour que ça reste diagnosticable.
+        if (!obj || !observer) {
+            clear();
+            return;
+        }
+        if (typeof observer.clone !== 'function') {
+            if (!noCloneWarned) {
+                noCloneWarned = true;
+                console.warn('SkyTrail: désactivé pour la session, l\'observateur du moteur n\'expose pas clone()');
+            }
             enabled = false;
             clear();
             return;
@@ -422,6 +451,11 @@
             if (cache.samples[i].tMs >= nowMs) ahead.push(cache.samples[i]);
         }
         if (ahead.length < 2) { applyHidden(); return; }
+
+        // On dessine réellement à partir d'ici : la couche n'est plus vide,
+        // `applyHidden` devra donc à nouveau écrire dans le DOM la prochaine
+        // fois qu'il n'y aura plus rien à montrer.
+        hidden = false;
 
         const projected = [];
         for (let i = 0; i < ahead.length; i++) {
