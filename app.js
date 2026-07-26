@@ -745,15 +745,33 @@ function displayedNowMs() {
 // `updateOverlay` n'a aucun try/catch : une exception y tuerait la boucle
 // requestAnimationFrame et figerait d'un coup la flèche, la boussole et les
 // labels d'étoiles. Le tracé de course, qui est du confort, ne doit jamais
-// pouvoir provoquer ça — on l'isole et on le désactive au premier échec.
-let skyTrailFailed = false;
+// pouvoir provoquer ça — on l'isole et on le coupe au premier échec.
+//
+// La coupure est TEMPORAIRE, pas définitive. Toutes les erreurs plausibles ici
+// sont passagères : une secousse du moteur WASM, ou un catalogue en cours de
+// rechargement après un changement de position. Un verrou permanent priverait
+// l'utilisateur du tracé jusqu'au redémarrage de l'app, sans rien afficher —
+// et comme le reste de la carte continue de fonctionner, rien n'aurait l'air
+// cassé. On réessaie donc après un délai : une erreur passagère se répare
+// toute seule, une erreur permanente ne coûte qu'un recalcul par demi-minute.
+const SKY_TRAIL_RETRY_MS = 30000;
+let skyTrailFailedAt = 0;   // 0 = pas en échec
 function safeTrail(fn) {
-    if (skyTrailFailed || typeof SkyTrail === 'undefined') return;
+    if (typeof SkyTrail === 'undefined') return;
+    if (skyTrailFailedAt) {
+        if (Date.now() - skyTrailFailedAt < SKY_TRAIL_RETRY_MS) return;
+        skyTrailFailedAt = 0;   // fin du délai : on retente
+    }
     try {
         fn();
     } catch (e) {
-        skyTrailFailed = true;   // une seule fois : sinon 60 logs par seconde
-        console.error('[stellarium] tracé de course désactivé après erreur', e);
+        // Un log par coupure, pas par frame : sans ce garde-fou, une erreur
+        // dans `render` produirait 60 lignes de console par seconde.
+        skyTrailFailedAt = Date.now();
+        console.error(
+            '[stellarium] tracé de course coupé après erreur, nouvel essai dans '
+            + (SKY_TRAIL_RETRY_MS / 1000) + ' s', e
+        );
         try { SkyTrail.clear(); } catch (e2) {}
     }
 }

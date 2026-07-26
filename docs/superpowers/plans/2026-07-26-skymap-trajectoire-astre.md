@@ -1879,6 +1879,7 @@ Onglet **au premier plan** (en arrière-plan le moteur ne charge ni étoiles, ni
 | Curseur temps déplacé (depuis l'app, ou `handleMessage({type:'setTime', time:new Date(Date.now()+5*3600e3).toISOString()})`) | Tracé recalculé depuis la nouvelle heure affichée |
 | Dézoom complet | Tracé lisible, labels espacés d'au moins ~28 px, aucun segment aberrant traversant l'écran |
 | Laisser tourner 5 min sur un astre sélectionné | La tête du tracé reste collée à l'astre (recalcul toutes les 60 s) |
+| **Maintenir** le − ou le + du sélecteur de date, avec un astre sélectionné, **sur un vrai téléphone** | `DateStepper` répète à 80 ms (`FAST_INTERVAL_MS`) et le throttle de 50 ms du TimeShifter ne mord pas → ~12 `setTime`/s, donc ~12 recalculs complets/s à ~6 ms mesurées. **Chercher une saccade.** Comparer sans astre sélectionné pour isoler. Si c'est perceptible, ajouter un debounce de ~200 ms avant le recalcul ; si non, ne rien faire — décision de Matthis de mesurer avant de complexifier |
 | Taper 50 astres d'affilée | Pas de ralentissement ; onglet Memory de Chrome stable (pas de fuite de clones WASM) |
 
 - [ ] **Step 8: Profiler le coût du calcul**
