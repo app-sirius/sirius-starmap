@@ -9,6 +9,7 @@
   },
   "scripts": {
     "serve": "node server.js",
-    "serve:python": "python server.py"
+    "serve:python": "python server.py",
+    "test": "node --test test/"
   }
 }
