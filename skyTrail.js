@@ -63,10 +63,109 @@
         return pad2(d.getHours()) + 'h' + pad2(d.getMinutes());
     }
 
+    // Dichotomie sur un changement de signe de l'altitude entre deux instants
+    // encadrants. 6 itérations sur un intervalle de 10 min ⇒ précision < 5 s,
+    // largement sous la minute affichée par formatExactTime.
+    //
+    // `altAt` est fourni par l'appelant (il détient le clone d'observateur), ce
+    // qui garde cette fonction pure et testable sur une altitude synthétique.
+    function findHorizonCrossing(tLoMs, tHiMs, altAt, iterations) {
+        const n = iterations === undefined ? 6 : iterations;
+        let lo = tLoMs;
+        let hi = tHiMs;
+        let altLo = altAt(lo);
+        for (let i = 0; i < n; i++) {
+            const mid = (lo + hi) / 2;
+            const altMid = altAt(mid);
+            if ((altLo >= 0) === (altMid >= 0)) {
+                lo = mid;
+                altLo = altMid;
+            } else {
+                hi = mid;
+            }
+        }
+        return (lo + hi) / 2;
+    }
+
+    // Construit l'attribut `d` d'un <path> à partir de points déjà projetés.
+    //
+    // Deux garde-fous, sans quoi la projection stéréographique produit des
+    // aberrations : un point non visible (sous l'horizon, derrière la caméra,
+    // coordonnées non finies) ouvre un nouveau sous-chemin `M` ; et un segment
+    // dont les DEUX extrémités sortent de `bounds` est écarté, sinon on trace
+    // des droites à sept chiffres qui balaient l'écran de part en part.
+    function buildPathData(points, bounds) {
+        const parts = [];
+        let current = null;
+        let prev = null;
+
+        function inBox(p) {
+            return p.px >= bounds.minX && p.px <= bounds.maxX
+                && p.py >= bounds.minY && p.py <= bounds.maxY;
+        }
+
+        for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            const drawable = !!p && p.visible === true
+                && isFinite(p.px) && isFinite(p.py);
+            if (!drawable) {
+                current = null;
+                prev = null;
+                continue;
+            }
+            if (!prev) {
+                current = null;
+                prev = p;
+                continue;
+            }
+            if (!inBox(prev) && !inBox(p)) {
+                current = null;
+                prev = p;
+                continue;
+            }
+            if (!current) {
+                current = [prev, p];
+                parts.push(current);
+            } else {
+                current.push(p);
+            }
+            prev = p;
+        }
+
+        return parts.map(function (seg) {
+            return 'M' + seg.map(function (p) {
+                return p.px.toFixed(1) + ',' + p.py.toFixed(1);
+            }).join('L');
+        }).join('');
+    }
+
+    // Écarte les labels qui se chevaucheraient en champ large. On compare
+    // toujours au dernier label RETENU, pas au repère précédent : sinon une
+    // grappe serrée ferait alterner gardé/rejeté au lieu d'espacer vraiment.
+    // Le repère (le point) reste dessiné dans tous les cas — seul le texte saute.
+    function declutterLabels(marks, minDistPx) {
+        const kept = [];
+        let last = null;
+        for (let i = 0; i < marks.length; i++) {
+            const m = marks[i];
+            if (last) {
+                const dx = m.px - last.px;
+                const dy = m.py - last.py;
+                if (Math.sqrt(dx * dx + dy * dy) < minDistPx) continue;
+            }
+            kept.push(m);
+            last = m;
+        }
+        return kept;
+    }
+
     const api = {
         buildSampleTimes: buildSampleTimes,
         formatHourLabel: formatHourLabel,
         formatExactTime: formatExactTime,
+        findHorizonCrossing: findHorizonCrossing,
+        buildPathData: buildPathData,
+        declutterLabels: declutterLabels,
     };
     global.SkyTrail = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
