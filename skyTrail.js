@@ -239,6 +239,9 @@
                 if (p) samples.push({ tMs: setMs, isHour: false, az: p.az, alt: p.alt, ok: true, kind: 'set' });
             }
 
+            // Chaque échantillon survivant porte aussi `ok: true` : un marqueur
+            // interne (hérité de `raw`, jamais retiré), pas un champ du format
+            // documenté {tMs, isHour, az, alt, kind?}. Ne pas s en étonner.
             return { samples: samples, riseMs: riseMs, setMs: setMs };
         } finally {
             // Sans ça on fuit un objet WASM à chaque tap sur un astre.

@@ -12,6 +12,10 @@ const MJD_EPOCH = 40587;
 // Faux moteur : `altFn(tMs)` décide de l altitude, l azimut suit une rampe.
 // Le « radec » transporte simplement l instant, que c2s relit — on ne teste pas
 // l astronomie du moteur, seulement notre logique d échantillonnage.
+//
+// `opts.nullAtIndices` simule un catalogue encore en cours de chargement :
+// les appels à getInfo dont le rang (0-based, dans l ordre d appel) figure
+// dans ce tableau renvoient null, les autres renvoient une position valide.
 function makeFake(altFn, opts) {
   const o = opts || {};
   const state = { destroyed: 0, cloned: 0, getInfoCalls: 0 };
@@ -27,9 +31,11 @@ function makeFake(altFn, opts) {
 
   const obj = {
     getInfo(what, obs) {
+      const callIdx = state.getInfoCalls;
       state.getInfoCalls++;
       if (o.throwOnGetInfo) throw new Error('boom');
       if (o.nullRadec) return null;
+      if (o.nullAtIndices && o.nullAtIndices.indexOf(callIdx) !== -1) return null;
       if (what !== 'radec') return null;
       return { tMs: (obs.utc - MJD_EPOCH) * 86400000 };
     },
@@ -128,6 +134,28 @@ test('l observateur vivant n est jamais écrit', () => {
   sampleTrail(f.obj, f.observer, 1800000000000, f.engine);
   assert.strictEqual(f.observer.utc, before);
   assert.strictEqual(f.state.cloned, 1);
+});
+
+test('échecs ponctuels de getInfo au milieu d une course bien visible : échantillons NaN filtrés, comptage réduit d autant', () => {
+  // Astre haut sur toute la fenêtre (riseIdx = 0, jamais de coucher) : la
+  // boucle d échantillonnage brute est la SEULE source d appels à getInfo,
+  // donc state.getInfoCalls == nombre d instants interrogés, un par un.
+  const now = new Date(2026, 6, 26, 20, 0, 0, 0).getTime();
+  const nullAt = [4, 5, 6]; // au milieu de la fenêtre de 6 h, pas aux bornes
+  const f = makeFake(() => 0.5, { nullAtIndices: nullAt });
+  const r = sampleTrail(f.obj, f.observer, now, f.engine, { windowMs: 6 * HOUR, stepMs: 30 * MIN });
+
+  const totalInstants = f.state.getInfoCalls;
+  assert.ok(totalInstants > nullAt.length, `${totalInstants} instants interrogés`);
+  assert.strictEqual(
+    r.samples.length,
+    totalInstants - nullAt.length,
+    `attendu ${totalInstants - nullAt.length} échantillons (sur ${totalInstants} instants), obtenu ${r.samples.length}`
+  );
+  for (const s of r.samples) {
+    assert.ok(isFinite(s.az), `az non fini : ${s.az}`);
+    assert.ok(isFinite(s.alt), `alt non fini : ${s.alt}`);
+  }
 });
 
 test('la fenêtre et le pas sont configurables', () => {
