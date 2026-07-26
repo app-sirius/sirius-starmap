@@ -61,6 +61,24 @@ test('un départ pile à l heure ne se compte pas lui-même comme heure ronde', 
   assert.strictEqual(hours[0].tMs, localDate(2026, 6, 26, 22, 0));
 });
 
+test('une heure ronde qui coïncide avec un échantillon du pas ne produit qu une seule entrée, marquée isHour', () => {
+  // 21h00 avec un pas de 30 min : la grille de pas tombe elle-même sur 22h00,
+  // qui est aussi l heure ronde forcée. Le Map keyé par tMs empêche tout
+  // doublon structurel, mais rien ne le vérifiait jusqu ici : on l affirme
+  // explicitement sur la série complète, pas seulement sur hours[0].
+  const start = localDate(2026, 6, 26, 21, 0);
+  const coincidingMs = localDate(2026, 6, 26, 22, 0);
+  const s = buildSampleTimes(start, { windowMs: 2 * HOUR, stepMs: 30 * MIN });
+
+  const atCoinciding = s.filter(x => x.tMs === coincidingMs);
+  assert.strictEqual(
+    atCoinciding.length,
+    1,
+    `attendu exactement une entrée à ${coincidingMs}, trouvé ${atCoinciding.length}`
+  );
+  assert.strictEqual(atCoinciding[0].isHour, true, 'l entrée coïncidente doit être marquée isHour');
+});
+
 test('la fenêtre est configurable', () => {
   const start = localDate(2026, 6, 26, 21, 37);
   const s = buildSampleTimes(start, { windowMs: 2 * HOUR, stepMs: 30 * MIN });
