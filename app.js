@@ -11,8 +11,8 @@ let isReactNative = false;
 // Étoiles brillantes (mag ≲ 2) qui doivent toujours afficher leur nom dans
 // le ciel, comme les planètes. Le moteur n'expose pas de filtre par
 // magnitude pour les hints d'étoiles (juste un toggle global), donc on
-// rend les labels en HTML par-dessus le canvas. Les noms FR sont résolus
-// via FR_NAMES (toFrench).
+// rend les labels en HTML par-dessus le canvas. Les noms sont traduits
+// via locale.localizeName (cf. i18n.js).
 const BRIGHT_STARS = [
     'Sirius', 'Vega', 'Altair', 'Rigel', 'Betelgeuse',
     'Polaris', 'Arcturus', 'Capella', 'Procyon',
@@ -63,124 +63,17 @@ function sendToReactNative(message) {
     }
 }
 
-// Traduction EN → FR des objets célestes les plus cliqués. Le moteur
-// Stellarium ne livre que des noms anglais ; on les francise à l'émission
-// (event 'objectClicked') et on les injecte dans translateFn (libellés
-// rendus DANS le canvas WASM).
-// REV_NAMES permet de re-router un lookAt avec un nom FR vers son ID EN.
-const FR_NAMES = {
-    'Sun': 'Soleil',
-    'Moon': 'Lune',
-    'Mercury': 'Mercure', 'Venus': 'Vénus', 'Earth': 'Terre',
-    'Mars': 'Mars', 'Jupiter': 'Jupiter', 'Saturn': 'Saturne',
-    'Uranus': 'Uranus', 'Neptune': 'Neptune', 'Pluto': 'Pluton',
-    'Io': 'Io', 'Europa': 'Europe', 'Ganymede': 'Ganymède', 'Callisto': 'Callisto',
-    'Phobos': 'Phobos', 'Deimos': 'Déimos',
-    'Titan': 'Titan', 'Enceladus': 'Encelade', 'Mimas': 'Mimas',
-    'Tethys': 'Téthys', 'Dione': 'Dioné', 'Rhea': 'Rhéa', 'Iapetus': 'Japet',
-    'Triton': 'Triton', 'Charon': 'Charon',
-    // Étoiles brillantes
-    'Sirius': 'Sirius', 'Vega': 'Véga', 'Altair': 'Altaïr',
-    'Rigel': 'Rigel', 'Betelgeuse': 'Bételgeuse',
-    'Polaris': 'Étoile polaire', 'Arcturus': 'Arcturus',
-    'Capella': 'Capella', 'Procyon': 'Procyon',
-    'Aldebaran': 'Aldébaran', 'Pollux': 'Pollux', 'Castor': 'Castor',
-    'Spica': 'Épi', 'Antares': 'Antarès', 'Fomalhaut': 'Fomalhaut',
-    'Deneb': 'Deneb', 'Regulus': 'Régulus', 'Bellatrix': 'Bellatrix',
-    'Mintaka': 'Mintaka', 'Alnilam': 'Alnilam', 'Alnitak': 'Alnitak',
-    'Saiph': 'Saïph', 'Canopus': 'Canopus', 'Achernar': 'Achernar', 'Hadar': 'Hadar',
-    // Constellations
-    'Ursa Major': 'Grande Ourse', 'Ursa Minor': 'Petite Ourse',
-    'Orion': 'Orion', 'Cassiopeia': 'Cassiopée',
-    'Leo': 'Lion', 'Virgo': 'Vierge', 'Scorpius': 'Scorpion',
-    'Taurus': 'Taureau', 'Gemini': 'Gémeaux', 'Cancer': 'Cancer',
-    'Sagittarius': 'Sagittaire', 'Capricornus': 'Capricorne',
-    'Aquarius': 'Verseau', 'Pisces': 'Poissons', 'Aries': 'Bélier',
-    'Libra': 'Balance', 'Andromeda': 'Andromède', 'Perseus': 'Persée',
-    'Auriga': 'Cocher', 'Cygnus': 'Cygne', 'Lyra': 'Lyre',
-    'Aquila': 'Aigle', 'Pegasus': 'Pégase', 'Hercules': 'Hercule',
-    'Bootes': 'Bouvier', 'Boötes': 'Bouvier', 'Canis Major': 'Grand Chien', 'Canis Minor': 'Petit Chien',
-    'Draco': 'Dragon', 'Hydra': 'Hydre',
-    'Centaurus': 'Centaure', 'Crux': 'Croix du Sud',
-    'Carina': 'Carène', 'Vela': 'Voiles', 'Puppis': 'Poupe',
-    // Constellations restantes (88 modernes)
-    'Antlia': 'Machine pneumatique', 'Apus': 'Oiseau de paradis',
-    'Ara': 'Autel', 'Caelum': 'Burin', 'Camelopardalis': 'Girafe',
-    'Canes Venatici': 'Chiens de chasse', 'Chamaeleon': 'Caméléon',
-    'Circinus': 'Compas', 'Columba': 'Colombe', 'Coma Berenices': 'Chevelure de Bérénice',
-    'Corona Australis': 'Couronne australe', 'Corona Borealis': 'Couronne boréale',
-    'Corvus': 'Corbeau', 'Crater': 'Coupe', 'Delphinus': 'Dauphin',
-    'Dorado': 'Dorade', 'Equuleus': 'Petit Cheval', 'Eridanus': 'Éridan',
-    'Fornax': 'Fourneau', 'Grus': 'Grue', 'Horologium': 'Horloge',
-    'Indus': 'Indien', 'Lacerta': 'Lézard', 'Leo Minor': 'Petit Lion',
-    'Lepus': 'Lièvre', 'Lupus': 'Loup', 'Lynx': 'Lynx',
-    'Mensa': 'Table', 'Microscopium': 'Microscope', 'Monoceros': 'Licorne',
-    'Musca': 'Mouche', 'Norma': 'Règle', 'Octans': 'Octant',
-    'Ophiuchus': 'Serpentaire', 'Pavo': 'Paon', 'Phoenix': 'Phénix',
-    'Pictor': 'Peintre', 'Piscis Austrinus': 'Poisson austral',
-    'Pyxis': 'Boussole', 'Reticulum': 'Réticule', 'Sagitta': 'Flèche',
-    'Sculptor': 'Sculpteur', 'Scutum': 'Écu de Sobieski',
-    'Cepheus': 'Céphée', 'Cetus': 'Baleine', 'Hydrus': 'Petite Hydre',
-    'Serpens': 'Serpent', 'Sextans': 'Sextant', 'Telescopium': 'Télescope',
-    'Triangulum': 'Triangle', 'Triangulum Australe': 'Triangle austral',
-    'Tucana': 'Toucan', 'Volans': 'Poisson volant', 'Vulpecula': 'Petit Renard',
-    // Objets du ciel profond les plus connus
-    'Andromeda Galaxy': "Galaxie d'Andromède",
-    'Triangulum Galaxy': 'Galaxie du Triangle',
-    'Whirlpool Galaxy': 'Galaxie du Tourbillon',
-    'Pinwheel Galaxy': 'Galaxie du Moulinet',
-    'Sombrero Galaxy': 'Galaxie du Sombrero',
-    'Orion Nebula': "Nébuleuse d'Orion",
-    'Crab Nebula': 'Nébuleuse du Crabe',
-    'Ring Nebula': 'Nébuleuse de la Lyre',
-    'Eagle Nebula': "Nébuleuse de l'Aigle",
-    'Lagoon Nebula': 'Nébuleuse de la Lagune',
-    'Pleiades': 'Pléiades', 'Hyades': 'Hyades',
-    // Satellites
-    'ISS': 'Station spatiale internationale',
-    'International Space Station': 'Station spatiale internationale',
-    'HST': 'Hubble',
-    'Hubble Space Telescope': 'Hubble',
-};
-
-// Libellés UI rendus dans le canvas (types, points cardinaux, etc.).
-// Sont fusionnés avec FR_NAMES dans translateFn ; on les sépare ici car
-// ils n'entrent pas dans REV_NAMES (pas d'équivalent "lookAt par nom").
-const FR_UI = {
-    // Points cardinaux (textes courts dessinés sur l'horizon)
-    'N': 'N', 'S': 'S', 'E': 'E', 'W': 'O',
-    'NE': 'NE', 'NW': 'NO', 'SE': 'SE', 'SW': 'SO',
-    'North': 'Nord', 'South': 'Sud', 'East': 'Est', 'West': 'Ouest',
-    'Zenith': 'Zénith', 'Nadir': 'Nadir',
-    // Types d'objets
-    'Star': 'Étoile', 'Double Star': 'Étoile double',
-    'Variable Star': 'Étoile variable',
-    'Planet': 'Planète', 'Dwarf Planet': 'Planète naine',
-    'Moon': 'Lune', 'Asteroid': 'Astéroïde', 'Comet': 'Comète',
-    'Satellite': 'Satellite', 'Artificial Satellite': 'Satellite artificiel',
-    'Galaxy': 'Galaxie', 'Spiral Galaxy': 'Galaxie spirale',
-    'Elliptical Galaxy': 'Galaxie elliptique',
-    'Nebula': 'Nébuleuse', 'Planetary Nebula': 'Nébuleuse planétaire',
-    'Emission Nebula': 'Nébuleuse en émission',
-    'Reflection Nebula': 'Nébuleuse par réflexion',
-    'Dark Nebula': 'Nébuleuse obscure',
-    'Cluster': 'Amas', 'Open Cluster': 'Amas ouvert',
-    'Globular Cluster': 'Amas globulaire',
-    'Star Cluster': 'Amas stellaire',
-    'Constellation': 'Constellation',
-    'Region': 'Région', 'Quasar': 'Quasar',
-};
-
-const TRANSLATIONS = { ...FR_NAMES, ...FR_UI };
-
-const REV_NAMES = Object.fromEntries(
-    Object.entries(FR_NAMES).map(([en, fr]) => [fr, en])
-);
+// Langue passée par l'app RN (?lang=fr|en|es), figée pour la vie de la page :
+// changer de langue recharge la WebView (les constellations ne se retraduisent
+// pas à chaud). Le moteur Stellarium ne livre que des noms anglais/latins ;
+// la locale les traduit à l'affichage (canvas via translateFn, labels HTML,
+// event 'objectClicked') et fait le chemin inverse pour lookAt. Cf. i18n.js.
+const locale = SkyI18n.createLocale(SkyI18n.normalizeLang(new URLSearchParams(location.search).get('lang')));
 
 // Mappe l'abbréviation IAU 3-lettres d'une constellation vers son nom latin
 // canonique. Le moteur retourne des designations type "CON western UMa" mais
 // jamais de prefixe "NAME ", donc sans cette table le popup affichait l'ID
-// brut ("CON western UMa") au lieu d'un nom utilisable par toFrench() et la
+// brut ("CON western UMa") au lieu d'un nom utilisable par localizeName() et la
 // recherche Wikipedia.
 const CONSTELLATION_BY_IAU = {
     And: 'Andromeda', Ant: 'Antlia', Aps: 'Apus', Aqr: 'Aquarius',
@@ -214,29 +107,51 @@ const CONSTELLATION_BY_IAU = {
 function resolveConstellation(designations) {
     for (const d of designations) {
         const m = /^CON\s+\S+\s+(\S+)$/.exec(d);
-        if (m && CONSTELLATION_BY_IAU[m[1]]) return CONSTELLATION_BY_IAU[m[1]];
+        if (m && latinFromIau(m[1])) return latinFromIau(m[1]);
     }
     for (const d of designations) {
-        if (CONSTELLATION_BY_IAU[d]) return CONSTELLATION_BY_IAU[d];
+        if (latinFromIau(d)) return latinFromIau(d);
     }
     return null;
 }
 
-function toFrench(name) {
-    return FR_NAMES[name] || name;
+// La skyculture écrit « Cvn » / « Tra » là où la table ci-dessus a « CVn » /
+// « TrA » : on accepte les deux graphies.
+function latinFromIau(iau) {
+    return CONSTELLATION_BY_IAU[iau] || SkyI18n.LATIN_BY_IAU[iau] || null;
 }
 
 // Nom d'affichage propre pour la pastille du curseur : RN passe la
 // désignation brute du moteur (ex. « NAME Sun »). On retire le préfixe
-// « NAME » puis on traduit (« Sun » → « Soleil »).
+// « NAME » puis on traduit (« Sun » → « Soleil » en français).
 function prettyName(name) {
     if (!name) return name;
-    return toFrench(name.replace(/^NAME\s+/i, ''));
+    return locale.localizeName(name.replace(/^NAME\s+/i, ''));
+}
+
+// Textes HTML hors canvas (index.html est écrit en français par défaut) et
+// libellés du tracé de course.
+function applyLocaleToPage() {
+    document.documentElement.lang = locale.lang;
+    document.title = locale.ui.title;
+    const loadingText = document.getElementById('loading-text');
+    if (loadingText) loadingText.textContent = locale.ui.loading;
+    const deselect = document.getElementById('arrow-label-close');
+    if (deselect) deselect.setAttribute('aria-label', locale.ui.deselect);
+    if (typeof SkyTrail !== 'undefined') {
+        SkyTrail.setMarkLabels({
+            formatHour: locale.formatHour,
+            formatTime: locale.formatTime,
+            rise: locale.ui.rise,
+            set: locale.ui.set,
+        });
+    }
 }
 
 async function initStellarium() {
     try {
         canvas = document.getElementById('canvas');
+        applyLocaleToPage();
 
         stel = await StelWebEngine({
             canvas: canvas,
@@ -245,7 +160,7 @@ async function initStellarium() {
             // (cf. stellarium-web-engine.js, onRuntimeInitialized) : tous les
             // strings passés à _() côté C transitent par ici avant d'être
             // dessinés sur le canvas.
-            translateFn: (domain, str) => TRANSLATIONS[str] || str,
+            translateFn: (domain, str) => locale.translate(str),
         });
 
         // Le moteur appelle glClearColor(0,0,0,1) depuis le WASM à chaque frame ;
@@ -271,7 +186,9 @@ async function initStellarium() {
 
         // CRITICAL — needed for the first night-sky frame at FOV 60°.
         stel.core.stars.addDataSource({ url: baseUrl + 'swe-data-packs/minimal/2020-09-01/minimal_2020-09-01_186e7ee2/stars', key: 'minimal' });
-        stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/western', key: 'western' });
+        // Une URL par langue : server.js y sert l'index.json traduit (noms des
+        // constellations), les illustrations restent celles de western/.
+        stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/western-' + locale.lang, key: 'western' });
         stel.core.dsos.addDataSource({ url: baseUrl + starsPack + '/dso' });
         stel.core.landscapes.addDataSource({ url: '/landscapes/mylandscape', key: 'mine' });
         stel.core.milkyway.addDataSource({ url: baseUrl + 'surveys/milkyway/v1' });
@@ -415,16 +332,16 @@ async function initStellarium() {
                 const namedValue = named ? named.substring(5) : null;
                 // Le moteur retourne "NAME And" pour la constellation Andromède
                 // (abbréviation IAU, pas le nom complet). On résout l'IAU vers
-                // le nom latin pour que toFrench() produise "Andromède" et que
+                // le nom latin pour que localizeName() produise "Andromède" et que
                 // la recherche Wikipedia hit l'article correct.
                 const constellationLatin =
-                    (namedValue && CONSTELLATION_BY_IAU[namedValue])
+                    (namedValue && latinFromIau(namedValue))
                     || resolveConstellation(designations);
                 const rawName = constellationLatin
                     || namedValue
                     || designations[0]
-                    || 'Objet';
-                const displayName = toFrench(rawName);
+                    || locale.ui.unknownObject;
+                const displayName = locale.localizeName(rawName);
                 // On préfixe avec le nom latin pour que CelestialObjectDetail
                 // affiche "Ursa Major" en sous-titre plutôt que l'ID brut
                 // "CON western UMa" (subtitle = première designation hors NAME
@@ -637,9 +554,9 @@ function applyBortle(bortle) {
 }
 
 function resolveObject(name) {
-    // Si on reçoit un nom FR (issu du tap → bottom sheet → onPoint),
+    // Si on reçoit un nom traduit (issu du tap → bottom sheet → onPoint),
     // on revient à l'identifiant EN connu du moteur.
-    const en = REV_NAMES[name] || name;
+    const en = locale.toEngineName(name);
     const cap = en.charAt(0).toUpperCase() + en.slice(1).toLowerCase();
     const messier = en.match(/^m\s*(\d+)$/i);
     const ngc = en.match(/^ngc\s*(\d+)$/i);
@@ -952,7 +869,7 @@ function buildStarLabels() {
     for (const name of BRIGHT_STARS) {
         const el = document.createElement('div');
         el.className = 'star-label';
-        el.textContent = toFrench(name);
+        el.textContent = locale.localizeName(name);
         container.appendChild(el);
         starLabels.push({ name, obj: null, el, _visible: false });
     }
@@ -1117,8 +1034,8 @@ let compassTicks = null;
 function buildCompass() {
     const track = document.getElementById('compass-track');
     if (!track) return [];
-    const majors = ['N', 'E', 'S', 'O'];
-    const mediums = ['NE', 'SE', 'SO', 'NO'];
+    const majors = locale.ui.compassMajors;
+    const mediums = locale.ui.compassMediums;
     const ticks = [];
     for (let deg = 0; deg < 360; deg += 15) {
         const el = document.createElement('div');
