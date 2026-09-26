@@ -512,10 +512,18 @@
         renderMarks(d, marks, declutterLabels(marks, LABEL_MIN_DIST_PX));
     }
 
+    const DEFAULT_MARK_LABELS = { formatHour: formatHourLabel, formatTime: formatExactTime, rise: 'lever', set: 'coucher' };
+    let markLabels = DEFAULT_MARK_LABELS;
+
+    // Libellés des repères, fournis par la locale (cf. i18n.js). null → défauts FR.
+    function setMarkLabels(labels) {
+        markLabels = labels ? Object.assign({}, DEFAULT_MARK_LABELS, labels) : DEFAULT_MARK_LABELS;
+    }
+
     function markText(m) {
-        if (m.kind === 'set') return 'coucher ' + formatExactTime(m.tMs);
-        if (m.kind === 'rise') return 'lever ' + formatExactTime(m.tMs);
-        return formatHourLabel(m.tMs);
+        if (m.kind === 'set') return markLabels.set + ' ' + markLabels.formatTime(m.tMs);
+        if (m.kind === 'rise') return markLabels.rise + ' ' + markLabels.formatTime(m.tMs);
+        return markLabels.formatHour(m.tMs);
     }
 
     // Pool de noeuds : un <circle> + un <text> par repère, réutilisés d une
@@ -567,6 +575,8 @@
         invalidate: invalidate,
         clear: clear,
         render: render,
+        setMarkLabels: setMarkLabels,
+        markText: markText,
     };
     global.SkyTrail = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
