@@ -54,7 +54,8 @@ pour `node --test`. Fonctions pures :
   - `translate(str)` — branché dans `translateFn` du moteur (noms + libellés UI moteur).
   - `localizeName(engineName)` — remplace `toFrench`. Clé absente → nom moteur inchangé.
   - `toEngineName(localized)` — remplace `REV_NAMES` (pour `lookAt`). Inconnu → inchangé.
-  - `ui` — textes HTML : `loading`, `unknownObject`, `compassMajors` (N E S O|W),
+  - `ui` — textes HTML : `title`, `loading`, `unknownObject`, `deselect` (aria-label),
+    `rise` / `set` (repères du tracé : lever/coucher, rise/set, salida/puesta), `compassMajors` (N E S O|W),
     `compassMediums` (NE SE SO NO | NE SE SW NW).
   - `formatHour(tMs)`, `formatTime(tMs)` — heure locale de l'appareil, formats ci-dessus.
 
@@ -78,8 +79,8 @@ identiques par construction.
   inchangée (les désignations `CON western UMa` ne bougent pas).
 - `toFrench` → `locale.localizeName`, `REV_NAMES` → `locale.toEngineName`, `'Objet'` →
   `locale.ui.unknownObject`, tableaux de la boussole → `locale.ui.compass*`.
-- `skyTrail.js` reçoit ses formateurs d'heure en paramètre (injection, pas de global),
-  avec les formats FR actuels par défaut pour ne pas casser ses tests.
+- `skyTrail.js` reçoit ses formateurs d'heure et les mots lever/coucher via
+  `SkyTrail.setMarkLabels()` (injection, pas de global), avec les libellés FR actuels par défaut.
 - `index.html` charge `i18n.js` avant `app.js`.
 
 ### 4. Constellations : skyculture par langue
@@ -121,11 +122,13 @@ comportement qu'un échec réseau aujourd'hui) ; pas de repli inter-langues.
   Le changement de langue re-rend l'écran → nouvelle URL → rechargement de la WebView.
 - Garde-fous d'URL (`originWhitelist`, `onShouldStartLoadWithRequest`, détection d'erreur
   du document principal) : comparer sans la query string.
-- **Réapplication de l'état au `ready`** : en plus de `insets` et de la position, renvoyer
-  l'état d'affichage courant — `toggleLayer` constellations si masquées, `setBortle` si la
-  pollution est active, `setTime` si le décalage temporel est non nul. AR et gyro sont
-  coupés au `onLoadStart` (capteurs natifs, redémarrage propre). Couvre aussi le bouton
-  « Réessayer » existant.
+- **Réapplication de l'état au `ready`** : `onLoadStart` remet `readyRef`/`ready` à faux
+  (un message envoyé avant le `ready` de la nouvelle page est perdu, le moteur l'ignore).
+  Au `ready`, en plus de `insets` et de la position, renvoyer l'état d'affichage courant :
+  `toggleLayer` constellations si masquées, `setBortle` si la pollution est active,
+  `setTime` si le décalage est non nul, `gyroMode` si le gyro tourne, `arMode` si l'AR est
+  active. (En pratique AR et gyro sont déjà coupés quand on quitte l'écran pour changer de
+  langue ; le renvoi couvre le retour sur l'écran et le bouton « Réessayer ».)
 - `CelestialObjectDetail` : aucun changement (Wikipédia est déjà interrogé dans la langue).
 
 ## Tests
