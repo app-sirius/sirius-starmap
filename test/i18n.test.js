@@ -94,3 +94,22 @@ test('formats d heure', () => {
   assert.strictEqual(es.formatHour(localDate(22, 0)), '22:00');
   assert.strictEqual(es.formatTime(localDate(3, 12)), '03:12');
 });
+
+test('lookAt : un nom français est résolu quelle que soit la langue', () => {
+  // L'app envoie des noms FR (« Visible ce soir », recherche) même en en/es.
+  for (const l of I.SUPPORTED) {
+    const loc = I.createLocale(l);
+    assert.strictEqual(loc.toEngineName('Vénus'), 'Venus', l);
+    assert.strictEqual(loc.toEngineName('Lune'), 'Moon', l);
+    assert.strictEqual(loc.toEngineName('Pléiades'), 'Pleiades', l);
+  }
+  // La langue courante reste prioritaire.
+  assert.strictEqual(I.createLocale('es').toEngineName('Luna'), 'Moon');
+});
+
+test('lookAt FR inchangé : en cas de doublon, la dernière clé gagne (comme REV_NAMES)', () => {
+  const fr = I.createLocale('fr');
+  assert.strictEqual(fr.toEngineName('Station spatiale internationale'), 'International Space Station');
+  assert.strictEqual(fr.toEngineName('Hubble'), 'Hubble Space Telescope');
+  assert.strictEqual(fr.toEngineName('Bouvier'), 'Boötes');
+});

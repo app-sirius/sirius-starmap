@@ -335,23 +335,31 @@
     function h12(d) { return d.getHours() % 12 || 12; }
     function ampm(d) { return d.getHours() < 12 ? 'AM' : 'PM'; }
 
+    // Inverse nom localisé → nom moteur, pour re-router un lookAt. Si deux
+    // clés partagent une traduction (alias, « Compass » en anglais), la
+    // dernière gagne, comme l'ancienne table REV_NAMES.
+    function reverse(names) {
+        const rev = {};
+        for (const key in names) rev[names[key]] = key;
+        return rev;
+    }
+
+    // L'app envoie des noms FRANÇAIS en lookAt quelle que soit sa langue
+    // (« Visible ce soir », recherche : cf. app/data/visibleTonightObjects.ts) :
+    // la table FR sert de repli à toutes les langues.
+    const FR_REV = reverse(NAMES.fr);
+
     function createLocale(lang) {
         lang = normalizeLang(lang);
         const names = NAMES[lang];
         const dict = Object.assign({}, names, ENGINE_UI[lang]);
-        // Inverse nom localisé → nom moteur, pour re-router un lookAt. Si deux
-        // clés partagent une traduction (alias, « Compass » en anglais), la
-        // première gagne : on n'écrase jamais une entrée.
-        const rev = {};
-        for (const key in names) {
-            if (!(names[key] in rev)) rev[names[key]] = key;
-        }
+        const rev = reverse(names);
         const fmt = TIME_FORMATS[lang];
         return {
             lang: lang,
             translate: function (str) { return dict[str] || str; },
             localizeName: function (name) { return names[name] || name; },
-            toEngineName: function (name) { return rev[name] || name; },
+            toEngineName: function (name) { return rev[name] || FR_REV[name] || name; },
             ui: UI[lang],
             formatHour: function (tMs) { return fmt.hour(new Date(tMs)); },
             formatTime: function (tMs) { return fmt.time(new Date(tMs)); },
