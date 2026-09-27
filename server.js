@@ -16,10 +16,12 @@ const root = __dirname;
 const UPSTREAM = 'https://stellarium.sfo2.cdn.digitaloceanspaces.com';
 const PROXY_PREFIX = '/data/';
 // Override local : si un fichier existe sous ./data-overrides/<path>,
-// on le sert au lieu de proxifier vers UPSTREAM. Utilisé pour franciser
-// les noms de constellations (skycultures/v3/western/index.json) que le
-// moteur rend directement sans passer par translateFn.
+// on le sert au lieu de proxifier vers UPSTREAM. Sert notamment les noms de
+// constellations traduits (cf. SKYCULTURE_I18N), que le moteur rend
+// directement sans passer par translateFn.
 const OVERRIDE_DIR = path.join(__dirname, 'data-overrides');
+// Skyculture traduite : une URL par langue (western-<lang>, cf. app.js).
+const SKYCULTURE_I18N = /^\/skycultures\/v3\/western-(fr|en|es)\/(.*)$/;
 
 const mime = {
     '.html': 'text/html; charset=utf-8',
@@ -43,28 +45,53 @@ const corsHeaders = {
     'Cross-Origin-Resource-Policy': 'cross-origin',
 };
 
-function proxy(req, res) {
-    const upstreamPath = req.url.slice(PROXY_PREFIX.length - 1);
-
-    // Override : sert le fichier local si présent dans data-overrides/.
-    const overridePath = path.join(OVERRIDE_DIR, upstreamPath);
-    if (overridePath.startsWith(OVERRIDE_DIR)) {
+// Décide si un chemin /data/* est servi depuis data-overrides/ ou proxifié.
+// L'index.json de la skyculture traduite est local ; ses illustrations
+// viennent de western/ upstream (identiques pour toutes les langues).
+function resolveDataPath(upstreamPath) {
+    const pathOnly = upstreamPath.split('?')[0];
+    // Chemin non canonique (« .. », « // ») : jamais servi en local.
+    if (path.posix.normalize(pathOnly) !== pathOnly) return { upstream: upstreamPath };
+    const m = SKYCULTURE_I18N.exec(pathOnly);
+    if (m) {
+        if (m[2] === 'index.json') {
+            return { local: path.join(OVERRIDE_DIR, 'skycultures/v3/western', `index.${m[1]}.json`) };
+        }
+        return { upstream: '/skycultures/v3/western/' + m[2] };
+    }
+    const overridePath = path.join(OVERRIDE_DIR, pathOnly);
+    if (overridePath.startsWith(OVERRIDE_DIR + path.sep)) {
         try {
-            const stat = fs.statSync(overridePath);
-            if (stat.isFile()) {
-                const ext = path.extname(overridePath).toLowerCase();
-                res.writeHead(200, {
-                    ...corsHeaders,
-                    'Content-Type': mime[ext] || 'application/octet-stream',
-                    'Content-Length': stat.size,
-                });
-                fs.createReadStream(overridePath).pipe(res);
-                return;
-            }
-        } catch (_) { /* pas d'override, on proxy */ }
+            if (fs.statSync(overridePath).isFile()) return { local: overridePath };
+        } catch (_) { /* pas d'override */ }
+    }
+    return { upstream: upstreamPath };
+}
+
+function serveLocal(res, filePath) {
+    fs.stat(filePath, (err, stat) => {
+        if (err || !stat.isFile()) {
+            res.writeHead(404, corsHeaders);
+            return res.end('Not found');
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        res.writeHead(200, {
+            ...corsHeaders,
+            'Content-Type': mime[ext] || 'application/octet-stream',
+            'Content-Length': stat.size,
+        });
+        fs.createReadStream(filePath).pipe(res);
+    });
+}
+
+function proxy(req, res) {
+    const resolved = resolveDataPath(req.url.slice(PROXY_PREFIX.length - 1));
+    if (resolved.local) {
+        serveLocal(res, resolved.local);
+        return;
     }
 
-    const target = new URL(UPSTREAM + upstreamPath);
+    const target = new URL(UPSTREAM + resolved.upstream);
 
     const upstreamReq = https.request(
         {
@@ -118,7 +145,10 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(port, '0.0.0.0', () => {
+module.exports = { resolveDataPath };
+
+// Démarrage seulement en exécution directe : les tests importent resolveDataPath.
+if (require.main === module) server.listen(port, '0.0.0.0', () => {
     console.log(`Serveur sur http://localhost:${port}`);
     console.log(`Proxy: ${PROXY_PREFIX}* -> ${UPSTREAM}/*`);
 });

@@ -5,10 +5,10 @@ WORKDIR /app
 # Cette ligne énumère les fichiers d'entrée par leur nom : tout nouvel
 # asset statique chargé à la racine (ex. un nouveau <script src=...> dans
 # index.html) doit être ajouté ici explicitement, sinon il 404 en prod tout
-# en fonctionnant en local via `npm run serve`. `data-overrides/` (override
-# FR des noms de constellations) manque aussi à l'image — omission
-# préexistante, hors périmètre de cette branche, non corrigée ici.
-COPY app.js index.html server.js package.json skyProjection.js skyTrail.js ./
+# en fonctionnant en local via `npm run serve`.
+COPY app.js i18n.js index.html server.js package.json skyProjection.js skyTrail.js ./
+# Skycultures traduites (noms des constellations par langue), cf. server.js.
+COPY data-overrides ./data-overrides
 COPY fonts ./fonts
 COPY landscapes ./landscapes
 COPY sirius-logo.png ./

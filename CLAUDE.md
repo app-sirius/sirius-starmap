@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WebAssembly-based astronomy visualization app embedding Stellarium Web Engine, designed to run in a browser or as a React Native WebView. The UI language is French.
+WebAssembly-based astronomy visualization app embedding Stellarium Web Engine, designed to run in a browser or as a React Native WebView. UI in French, English or Spanish (`?lang=`, default French — see `i18n.js`).
 
 ## Running the Dev Server
 
 ```bash
-npm run serve        # or: python server.py [port]
+npm run serve        # server.js — serveur de référence (python server.py ne gère ni overrides ni langues)
+npm test             # node --test
 ```
 
 Opens on `http://localhost:8000`. The server adds CORS and `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers required for SharedArrayBuffer/WASM.
@@ -21,9 +22,14 @@ Opens on `http://localhost:8000`. The server adds CORS and `Cross-Origin-Opener-
 - `index.html` — Entry point. Fullscreen `<canvas>` for WebGL rendering, loading spinner, status panel.
 - `app.js` — Application logic: initializes the WASM engine, runs the render loop, handles bidirectional message passing with a parent React Native WebView.
 - `stellarium-web-engine.js` / `.wasm` — Emscripten-compiled Stellarium core. **Do not edit** — these are generated artifacts.
-- `server.py` — Minimal Python HTTP server with required COOP/COEP headers.
+- `i18n.js` — Traductions fr/en/es de la carte (noms d'objets, libellés moteur, textes HTML, formats d'heure). Fonctions pures, testées sous `node --test`.
+- `server.js` — Serveur de dev/prod : COOP/COEP, proxy `/data/*` vers le CDN Stellarium, overrides locaux (`data-overrides/`) et skyculture par langue (`/data/skycultures/v3/western-<lang>/index.json` → `data-overrides/skycultures/v3/western/index.<lang>.json`).
+- `scripts/build-skyculture-i18n.js` — Régénère les `index.<lang>.json` depuis l'upstream (à relancer si les noms de constellations changent dans `i18n.js`).
+- `server.py` — Minimal Python HTTP server with required COOP/COEP headers (sans overrides ni langues).
 
 ## React Native WebView Bridge
+
+**Langue** : l'app charge la page avec `?lang=fr|en|es` (absent/inconnu → `fr`). Figée pour la vie de la page ; changer de langue recharge la WebView. Les noms renvoyés (`objectClicked.name`) sont dans cette langue, et `lookAt` accepte un nom traduit ou une désignation moteur.
 
 `app.js` detects `window.ReactNativeWebView` and uses `postMessage` for communication.
 
