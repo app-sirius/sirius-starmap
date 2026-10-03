@@ -188,7 +188,10 @@ async function initStellarium() {
         stel.core.stars.addDataSource({ url: baseUrl + 'swe-data-packs/minimal/2020-09-01/minimal_2020-09-01_186e7ee2/stars', key: 'minimal' });
         // Une URL par langue : server.js y sert l'index.json traduit (noms des
         // constellations), les illustrations restent celles de western/.
-        stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/western-' + locale.lang, key: 'western' });
+        // L'URL doit finir par « /western » : le moteur tire l'id de la
+        // skyculture du dernier segment (key ignorée) et n'active que
+        // « western » — avec « western-fr », aucune constellation ne s'affiche.
+        stel.core.skycultures.addDataSource({ url: baseUrl + 'skycultures/v3/' + locale.lang + '/western', key: 'western' });
         stel.core.dsos.addDataSource({ url: baseUrl + starsPack + '/dso' });
         stel.core.landscapes.addDataSource({ url: '/landscapes/mylandscape', key: 'mine' });
         stel.core.milkyway.addDataSource({ url: baseUrl + 'surveys/milkyway/v1' });

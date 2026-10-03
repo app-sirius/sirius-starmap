@@ -20,8 +20,8 @@ const PROXY_PREFIX = '/data/';
 // constellations traduits (cf. SKYCULTURE_I18N), que le moteur rend
 // directement sans passer par translateFn.
 const OVERRIDE_DIR = path.join(__dirname, 'data-overrides');
-// Skyculture traduite : une URL par langue (western-<lang>, cf. app.js).
-const SKYCULTURE_I18N = /^\/skycultures\/v3\/western-(fr|en|es)\/(.*)$/;
+// Skyculture traduite : une URL par langue (<lang>/western, cf. app.js).
+const SKYCULTURE_I18N = /^\/skycultures\/v3\/(fr|en|es)\/western\/(.*)$/;
 
 const mime = {
     '.html': 'text/html; charset=utf-8',

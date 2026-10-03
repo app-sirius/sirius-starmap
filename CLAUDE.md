@@ -23,7 +23,7 @@ Opens on `http://localhost:8000`. The server adds CORS and `Cross-Origin-Opener-
 - `app.js` — Application logic: initializes the WASM engine, runs the render loop, handles bidirectional message passing with a parent React Native WebView.
 - `stellarium-web-engine.js` / `.wasm` — Emscripten-compiled Stellarium core. **Do not edit** — these are generated artifacts.
 - `i18n.js` — Traductions fr/en/es de la carte (noms d'objets, libellés moteur, textes HTML, formats d'heure). Fonctions pures, testées sous `node --test`.
-- `server.js` — Serveur de dev/prod : COOP/COEP, proxy `/data/*` vers le CDN Stellarium, overrides locaux (`data-overrides/`) et skyculture par langue (`/data/skycultures/v3/western-<lang>/index.json` → `data-overrides/skycultures/v3/western/index.<lang>.json`).
+- `server.js` — Serveur de dev/prod : COOP/COEP, proxy `/data/*` vers le CDN Stellarium, overrides locaux (`data-overrides/`) et skyculture par langue (`/data/skycultures/v3/<lang>/western/index.json` → `data-overrides/skycultures/v3/western/index.<lang>.json`).
 - `scripts/build-skyculture-i18n.js` — Régénère les `index.<lang>.json` depuis l'upstream (à relancer si les noms de constellations changent dans `i18n.js`).
 - `server.py` — Minimal Python HTTP server with required COOP/COEP headers (sans overrides ni langues).
 
