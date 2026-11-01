@@ -6,7 +6,7 @@ WORKDIR /app
 # asset statique chargé à la racine (ex. un nouveau <script src=...> dans
 # index.html) doit être ajouté ici explicitement, sinon il 404 en prod tout
 # en fonctionnant en local via `npm run serve`.
-COPY app.js i18n.js index.html server.js package.json skyProjection.js skyTrail.js ./
+COPY app.js i18n.js index.html server.js package.json skyProjection.js skyTrail.js horizonMask.js ./
 # Skycultures traduites (noms des constellations par langue), cf. server.js.
 COPY data-overrides ./data-overrides
 COPY fonts ./fonts

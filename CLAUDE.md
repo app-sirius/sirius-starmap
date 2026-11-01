@@ -41,8 +41,9 @@ Opens on `http://localhost:8000`. The server adds CORS and `Cross-Origin-Opener-
 - `toggleLayer` — Show/hide layers: `atmosphere`, `landscapes`, `constellations`, `stars`
 - `search` — Search celestial objects (`query`)
 - `setFov` — Set field of view in degrees (`fov`)
+- `setHorizonDebug` — Spike masque d'horizon : affiche des tuiles GeoJSON d'obstacles (`preset`: `test90`|`bench`|`off`, `z?` ordre de dessin, 60 par défaut). Cf. `docs/horizon-mask-spike.md`
 
-**Outbound messages** (WebView → React Native): `ready`, `error`, `lookAtSuccess`, `lookAtError`, `searchResults`.
+**Outbound messages** (WebView → React Native): `ready`, `error`, `lookAtSuccess`, `lookAtError`, `searchResults`, `horizonBench` (`avgMs`, `maxMs`, `tiles` : réponse du preset `bench` après 10 s).
 
 ## Stellarium Web Engine API
 
