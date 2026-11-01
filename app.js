@@ -500,6 +500,11 @@ async function initStellarium() {
         const target = params.get('target') || (params.keys().next().value || null);
         if (target) pointAt(target);
 
+        // Spike masque d'horizon : ?horizonDebug=test90|bench|off pour tester sur
+        // ordinateur (npm run serve), sans passer par l'app.
+        const horizonDebug = params.get('horizonDebug');
+        if (horizonDebug) setHorizonDebug(horizonDebug);
+
         // Hydrate non-critical surveys after the first paint settles.
         // requestIdleCallback is not on every WebView; setTimeout fallback.
         const idle = window.requestIdleCallback
@@ -599,6 +604,93 @@ let inertiaLastFrameT = 0;     // performance.now() de la frame précédente
 // Mode AR (passthrough caméra) : quand actif, le fond du canvas est rendu
 // transparent pour laisser voir la caméra native dessous (cf. case 'arMode').
 let arMode = false;
+
+// --- Masque d'obstacles de l'horizon (spike) ---------------------------------
+// Tuiles GeoJSON dans le repère observé (lon = azimut, lat = hauteur), dessinées
+// par le module `geojson` du moteur sur un calque à part. Géométrie : cf.
+// horizonMask.js. `filterAll` ne s'applique qu'une fois : on le relance après
+// chaque `setData` et au changement d'arMode. Protocole de vérification :
+// docs/horizon-mask-spike.md.
+const HORIZON_DEFAULT_Z = 60;
+const HORIZON_BENCH_PERIOD_MS = 200;
+const HORIZON_BENCH_DURATION_MS = 10000;
+let horizonLayer = null;
+let horizonGeo = null;
+let horizonZ = null;
+let horizonBenchTimer = null;
+
+function ensureHorizonLayer(z = HORIZON_DEFAULT_Z) {
+    if (horizonLayer && horizonZ !== z) {
+        // z différent : on retire l'ancien calque (repli : on le masque).
+        try {
+            stel.core.remove(horizonLayer);
+        } catch (e) {
+            horizonLayer.visible = false;
+        }
+        horizonLayer = null;
+        horizonGeo = null;
+    }
+    if (!horizonLayer) {
+        horizonLayer = stel.createLayer({ z, visible: true });
+        horizonGeo = horizonLayer.add('geojson', { frame: stel.FRAME_OBSERVED });
+        horizonZ = z;
+    }
+    return horizonGeo;
+}
+
+function styleHorizon() {
+    if (!horizonGeo) return;
+    horizonGeo.filterAll(() => ({
+        fill: arMode ? [0, 0, 0, 1] : [0, 0, 0, 0.75],
+        stroke: [0, 0, 0, 0],
+    }));
+}
+
+function applyHorizon(fc) {
+    if (!horizonGeo) return;
+    horizonGeo.setData(fc);
+    styleHorizon();
+}
+
+function stopHorizonBench() {
+    if (horizonBenchTimer !== null) {
+        clearInterval(horizonBenchTimer);
+        horizonBenchTimer = null;
+    }
+}
+
+// Rejoue setData + filterAll toutes les 200 ms pendant 10 s en chronométrant
+// chaque passe, puis publie horizonBench { avgMs, maxMs, tiles }.
+function runHorizonBench(fc) {
+    stopHorizonBench();
+    const samples = [];
+    const startedAt = performance.now();
+    horizonBenchTimer = setInterval(() => {
+        const t0 = performance.now();
+        applyHorizon(fc);
+        samples.push(performance.now() - t0);
+        if (performance.now() - startedAt >= HORIZON_BENCH_DURATION_MS) {
+            stopHorizonBench();
+            const sum = samples.reduce((a, b) => a + b, 0);
+            sendToReactNative({
+                type: 'horizonBench',
+                avgMs: samples.length ? sum / samples.length : 0,
+                maxMs: samples.length ? Math.max(...samples) : 0,
+                tiles: fc.features.length,
+            });
+        }
+    }, HORIZON_BENCH_PERIOD_MS);
+}
+
+function setHorizonDebug(preset, z) {
+    stopHorizonBench();
+    const name = preset === 'test90' || preset === 'bench' ? preset : 'off';
+    if (name === 'off' && !horizonGeo) return;
+    ensureHorizonLayer(typeof z === 'number' ? z : horizonZ || HORIZON_DEFAULT_Z);
+    const fc = HorizonMask.intervalsToTiles(HorizonMask.presetBins(name));
+    applyHorizon(fc);
+    if (name === 'bench') runHorizonBench(fc);
+}
 
 // Plafond de densité de rendu EN MODE AR uniquement.
 // Why: la boucle du moteur (cf. stellarium-web-engine.js) dimensionne son canvas
@@ -1332,8 +1424,16 @@ function handleMessage(data) {
                     // Revient au zoom vision humaine (le gyro reste actif).
                     stel.core.fov = EYE_VISION_FOV_RAD;
                 }
+                // Le masque d'obstacles passe d'un noir translucide (fond de ciel
+                // rendu) à un noir opaque (fond transparent : retire les étoiles
+                // et laisse voir la caméra).
+                styleHorizon();
                 break;
             }
+
+            case 'setHorizonDebug':
+                setHorizonDebug(message.preset, message.z);
+                break;
         }
     } catch (error) {
         console.error('handleMessage failed', error);
